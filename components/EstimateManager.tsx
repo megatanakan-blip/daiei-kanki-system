@@ -1,0 +1,1089 @@
+
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import ReactDOM from 'react-dom';
+import { Estimate, EstimateStatus, Customer, MaterialItem, SlipItem } from '../types';
+import { X, Printer, Search, FileText, Trash2, CheckCircle2, XCircle, Clock, ChevronRight, Loader2, Calendar, User, MapPin, Edit3, Plus, Minus, Save, RotateCcw, Camera, Sparkles, ShoppingCart } from 'lucide-react';
+import * as storage from '../services/firebaseService';
+import { parseOrderMemo } from '../services/geminiService';
+
+const COMPANY_INFO = {
+  name: "大栄管機株式会社",
+  zipCode: "〒080-0048",
+  address: "北海道帯広市西18条北1丁目1-14",
+  phone: "0155-35-6815",
+  fax: "0155-36-2661",
+};
+
+const generateId = () => Math.random().toString(36).substring(2) + Date.now().toString(36);
+
+interface EstimateManagerProps {
+  onClose: () => void;
+  onConvertToSlip?: (items: SlipItem[], customer: string, site?: string) => void;
+  masterItems: MaterialItem[];
+}
+
+// Cover Page Component (Page 1)
+const EstimateCoverPage = ({ estimate, isEditing, onUpdateMeta, pageTotals }: {
+  estimate: Estimate,
+  isEditing: boolean,
+  onUpdateMeta: (data: Partial<Estimate>) => void,
+  pageTotals: { page: number; total: number }[]
+}) => {
+  return (
+    <div className="bg-white p-10 text-slate-900 flex flex-col justify-between h-full w-full box-border min-h-[280mm] print:p-0 print:min-h-0 print:h-auto">
+      <div className="w-full">
+        <div className="flex justify-between items-end border-b-4 border-slate-900 pb-2 mb-6 print:mb-2 print:pb-1">
+          <h1 className="text-3xl font-serif font-bold tracking-[0.5em]">御見積書</h1>
+          <div className="text-right text-xs font-mono">
+            <p>No. {estimate.slipNumber || 'EST-PENDING'}</p>
+            <div className="flex items-center justify-end gap-1">
+              <span>日付:</span>
+              {isEditing ? (
+                <input type="date" value={estimate.date} onChange={e => onUpdateMeta({ date: e.target.value })} className="border rounded px-1" />
+              ) : (
+                <span>{estimate.date}</span>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-1 text-blue-600 font-bold">
+              <span>有効期限:</span>
+              {isEditing ? (
+                <input type="date" value={estimate.validUntil} onChange={e => onUpdateMeta({ validUntil: e.target.value })} className="border rounded px-1" />
+              ) : (
+                <span>{estimate.validUntil}</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-between mb-6 items-start print:mb-2">
+          <div className="w-[60%]">
+            <div className="flex items-center gap-2 mb-4">
+              {isEditing ? (
+                <input type="text" value={estimate.customerName} onChange={e => onUpdateMeta({ customerName: e.target.value })} className="text-2xl font-bold border-b-2 border-slate-300 focus:border-blue-500 outline-none w-full" placeholder="顧客名を入力" />
+              ) : (
+                <h2 className="text-2xl font-bold underline underline-offset-8 decoration-slate-300">{estimate.customerName} 御中</h2>
+              )}
+            </div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="bg-slate-800 text-white text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider shrink-0">現場</span>
+              {isEditing ? (
+                <input type="text" value={estimate.constructionName || ''} onChange={e => onUpdateMeta({ constructionName: e.target.value })} className="text-lg font-bold border-b border-slate-200 outline-none w-full" placeholder="現場名を入力" />
+              ) : (
+                <span className="text-lg font-bold">{estimate.constructionName || '一般・共通'}</span>
+              )}
+            </div>
+            <p className="text-[10px] mt-4 text-slate-500 font-bold tracking-tight border-l-4 border-slate-200 pl-3 leading-relaxed">下記の通り、御見積り申し上げます。（表示価格は全て税抜です）</p>
+          </div>
+          <div className="w-[40%] text-right text-[10px] flex flex-col items-end gap-3">
+            <div className="text-right leading-relaxed">
+              <h3 className="text-sm font-bold mb-1">{COMPANY_INFO.name}</h3>
+              <p>{COMPANY_INFO.zipCode} {COMPANY_INFO.address}</p>
+              <p className="mt-1 font-bold">TEL: {COMPANY_INFO.phone}</p>
+              <div className="flex justify-end gap-1 mt-1 font-bold">
+                <span>担当:</span>
+                {isEditing ? (
+                  <input type="text" value={estimate.receivingPerson || ''} onChange={e => onUpdateMeta({ receivingPerson: e.target.value })} className="border rounded px-1 w-24" placeholder="担当者" />
+                ) : (
+                  <span>{estimate.receivingPerson || '本部'}</span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Page Totals Summary Table */}
+        <table className="w-full border-collapse table-fixed text-[10px] border-2 border-slate-900 mb-4" style={{ marginBottom: '8px' }}>
+          <thead>
+            <tr className="bg-slate-100 border-y-2 border-slate-900">
+              <th className="py-2 px-3 text-left border-r w-[70%]">ページ</th>
+              <th className="py-2 px-3 text-right w-[30%]">金額 (税抜)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pageTotals.map((pt, idx) => (
+              <tr key={idx} className="border-b border-slate-200" style={{ height: '9mm' }}>
+                <td className="px-3 border-r font-bold">P{pt.page} - 内訳</td>
+                <td className="px-3 text-right font-mono font-bold">¥{pt.total.toLocaleString()}</td>
+              </tr>
+            ))}
+            {Array.from({ length: Math.max(0, 16 - pageTotals.length) }).map((_, i) => (
+              <tr key={`empty-${i}`} className="border-b border-slate-200" style={{ height: '9mm' }}>
+                <td className="border-r"></td>
+                <td></td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="bg-slate-50 font-bold border-t-2 border-slate-900">
+              <td className="py-2.5 px-3 text-right border-r text-[10px] uppercase">小計 (税抜)</td>
+              <td className="py-2.5 px-3 text-right font-mono text-base">¥{(estimate.totalAmount || 0).toLocaleString()}</td>
+            </tr>
+            <tr className="bg-slate-50 font-bold">
+              <td className="py-2.5 px-3 text-right border-r text-[10px] uppercase">消費税 (10%)</td>
+              <td className="py-2.5 px-3 text-right font-mono text-base">¥{(estimate.taxAmount || 0).toLocaleString()}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div className="text-[8px] text-slate-400 flex justify-between font-mono italic mt-4 shrink-0">
+        <span>ESTIMATE - COVER PAGE / TAX NOT INCLUDED IN ITEM PRICE</span>
+        <span>DAIEI KANKI Co., Ltd.</span>
+      </div>
+    </div>
+  );
+};
+
+// Detail Page Component (Page 2+) - Item table only
+const EstimateDetailPage = ({ estimate, pageNumber, isEditing, onUpdateItem, onDeleteItem, masterItems }: {
+  estimate: Estimate,
+  pageNumber: number,
+  isEditing: boolean,
+  onUpdateItem: (idx: number, data: Partial<SlipItem>) => void,
+  onDeleteItem: (idx: number) => void,
+  masterItems: MaterialItem[]
+}) => {
+  const [suggestionIdx, setSuggestionIdx] = useState<number | null>(null);
+  const [suggestionType, setSuggestionType] = useState<'name' | 'model' | null>(null);
+  const [query, setQuery] = useState('');
+
+  const suggestions = useMemo(() => {
+    if (!query.trim() || suggestionIdx === null) return [];
+    const keywords = query.toLowerCase().split(/[\s\u3000]+/).filter(k => k.length > 0);
+    return masterItems.filter(i => {
+      const text = `${i.name} ${i.model || ''} ${i.dimensions || ''}`.toLowerCase();
+      return keywords.every(k => text.includes(k));
+    }).slice(0, 8);
+  }, [query, masterItems, suggestionIdx]);
+
+  const handleSelect = (idx: number, item: MaterialItem) => {
+    onUpdateItem(idx, {
+      id: item.id,
+      name: item.name,
+      manufacturer: item.manufacturer,
+      model: item.model,
+      dimensions: item.dimensions,
+      unit: item.unit || '個',
+      listPrice: item.listPrice || 0,
+      appliedPrice: item.sellingPrice || 0,
+      category: item.category
+    });
+    setSuggestionIdx(null);
+    setSuggestionType(null);
+    setQuery('');
+  };
+
+  return (
+    <div className="bg-white p-10 text-slate-900 flex flex-col justify-between h-full w-full box-border min-h-[280mm] print:p-0 print:min-h-0 print:h-auto">
+      <div className="w-full">
+        {/* Simplified header for detail pages */}
+        <div className="flex justify-between items-center border-b-2 border-slate-300 pb-1 mb-3 print:mb-2">
+          <h2 className="text-lg font-bold">内訳 (Page {pageNumber})</h2>
+          <div className="text-xs text-slate-500">{estimate.customerName} 様 - {estimate.constructionName || '一般'}</div>
+        </div>
+
+        {/* Items table only */}
+        <table className="w-full border-collapse table-fixed text-[10px] border-2 border-slate-900" style={{ marginBottom: '8px' }}>
+          <thead>
+            <tr className="bg-slate-100 border-y-2 border-slate-900">
+              <th className="py-2 px-1 w-[4%] border-r text-center">No</th>
+              <th className="py-2 px-2 text-left border-r w-[26%]">品名 / メーカー</th>
+              <th className="py-2 px-2 text-left border-r w-[22%]">型式 / 寸法</th>
+              <th className="py-2 px-2 text-right border-r w-[8%]">数量</th>
+              <th className="py-2 px-1 text-center border-r w-[6%]">単位</th>
+              <th className="py-2 px-2 text-right border-r w-[11%] text-slate-400">定価(抜)</th>
+              <th className="py-2 px-2 text-right border-r w-[11%]">売価(抜)</th>
+              <th className="py-2 px-2 text-right w-[12%]">金額</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from({ length: 16 }).map((_, idx) => {
+              const item = estimate.items?.[idx];
+              const amount = item ? (item.appliedPrice || 0) * (item.quantity || 0) : 0;
+
+              if (!item && !isEditing) {
+                return (
+                  <tr key={`empty-${idx}`} className="border-b h-[10.5mm] print:h-[9mm] border-slate-200">
+                    <td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td></td>
+                  </tr>
+                );
+              }
+
+              return (
+                <tr key={idx} className="border-b h-[10.5mm] print:h-[9mm] border-slate-200 hover:bg-slate-50 transition-colors group">
+                  <td className="text-center border-r text-[9px] font-mono">{idx + 1}</td>
+                  <td className="px-2 border-r relative">
+                    {isEditing ? (
+                      <div className="flex flex-col gap-0.5 relative">
+                        <input
+                          type="text"
+                          value={item?.name || ''}
+                          onChange={e => { onUpdateItem(idx, { name: e.target.value }); setQuery(e.target.value); }}
+                          onFocus={e => { setSuggestionIdx(idx); setSuggestionType('name'); setQuery(e.target.value); }}
+                          className="w-full text-[10px] px-1 py-0.5 border rounded focus:ring-1 focus:ring-blue-300 outline-none font-bold"
+                          placeholder="品名"
+                        />
+                        {item?.manufacturer && <span className="text-[8px] text-slate-500 truncate">{item.manufacturer}</span>}
+                        {suggestionIdx === idx && suggestionType === 'name' && suggestions.length > 0 && (
+                          <div className="absolute top-full left-0 z-50 bg-white border-2 border-blue-300 rounded-lg shadow-2xl w-96 max-h-64 overflow-auto">
+                            {suggestions.map((s, i) => (
+                              <div key={i} onClick={() => handleSelect(idx, s)} className="px-3 py-2 hover:bg-blue-50 cursor-pointer border-b last:border-b-0">
+                                <div className="font-bold text-[11px]">{s.name}</div>
+                                <div className="text-[9px] text-slate-500">{s.manufacturer} / {s.model}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex flex-col">
+                        <span className="font-bold truncate text-[10px]">{item?.name}</span>
+                        {item?.manufacturer && <span className="text-[8px] text-slate-500 truncate">{item.manufacturer}</span>}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-2 border-r relative font-medium">
+                    {isEditing ? (
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={`${item?.model || ''} ${item?.dimensions || ''}`.trim()}
+                          onChange={e => { const [model, ...dims] = e.target.value.split(' '); onUpdateItem(idx, { model, dimensions: dims.join(' ') }); setQuery(e.target.value); }}
+                          onFocus={e => { setSuggestionIdx(idx); setSuggestionType('model'); setQuery(e.target.value); }}
+                          className="w-full text-[10px] px-1 py-0.5 border rounded"
+                          placeholder="型式 寸法"
+                        />
+                        {suggestionIdx === idx && suggestionType === 'model' && suggestions.length > 0 && (
+                          <div className="absolute top-full left-0 z-50 bg-white border-2 border-blue-300 rounded-lg shadow-2xl w-96 max-h-64 overflow-auto mt-1">
+                            {suggestions.map(s => (
+                              <div key={s.id} onClick={() => handleSelect(idx, s)} className="px-3 py-2 hover:bg-blue-50 cursor-pointer border-b border-slate-100 last:border-0">
+                                <div className="font-bold text-xs text-slate-800">{s.name}</div>
+                                <div className="text-[10px] text-slate-500 mt-0.5">{s.manufacturer} | {s.model} {s.dimensions}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="truncate text-[10px]">{item?.model} {item?.dimensions}</span>
+                    )}
+                  </td>
+                  <td className="px-2 text-right border-r">
+                    {isEditing ? (
+                      <input type="number" value={item?.quantity || ''} onChange={e => onUpdateItem(idx, { quantity: parseFloat(e.target.value) || 0 })} className="w-full text-right px-1 py-0.5 border rounded font-mono" />
+                    ) : (
+                      <span className="font-mono">{item && item.quantity > 0 ? item.quantity.toLocaleString() : ''}</span>
+                    )}
+                  </td>
+                  <td className="px-1 text-center border-r">
+                    {isEditing ? (
+                      <input type="text" value={item?.unit || '個'} onChange={e => onUpdateItem(idx, { unit: e.target.value })} className="w-full text-center px-1 py-0.5 border rounded font-medium" />
+                    ) : (
+                      <span className="font-medium">{item?.unit}</span>
+                    )}
+                  </td>
+                  <td className="px-2 text-right border-r">
+                    {isEditing ? (
+                      <input type="number" value={item?.listPrice || ''} onChange={e => onUpdateItem(idx, { listPrice: parseFloat(e.target.value) || 0 })} className="w-full text-right px-1 py-0.5 border rounded font-mono text-slate-400" placeholder="0" />
+                    ) : (
+                      <span className="font-mono text-slate-400">{item && item.listPrice > 0 ? `¥${item.listPrice.toLocaleString()}` : ''}</span>
+                    )}
+                  </td>
+                  <td className="px-2 text-right border-r">
+                    {isEditing ? (
+                      <input type="number" value={item?.appliedPrice || ''} onChange={e => onUpdateItem(idx, { appliedPrice: parseFloat(e.target.value) || 0 })} className="w-full text-right px-1 py-0.5 border rounded font-mono font-bold" placeholder="0" />
+                    ) : (
+                      <span className="font-mono font-bold">{item && item.appliedPrice > 0 ? `¥${item.appliedPrice.toLocaleString()}` : ''}</span>
+                    )}
+                  </td>
+                  <td className="px-2 text-right font-mono font-bold relative">
+                    {amount > 0 ? `¥${amount.toLocaleString()}` : ''}
+                    {isEditing && item?.name && (
+                      <button onClick={() => onDeleteItem(idx)} className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity text-rose-500 hover:bg-rose-50 rounded p-1">
+                        <X size={12} />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="text-[8px] text-slate-400 flex justify-between font-mono italic mt-4 shrink-0">
+        <span>ESTIMATE -DETAIL PAGE / TAX NOT INCLUDED IN ITEM PRICE</span>
+        <span>DAIEI KANKI Co., Ltd.</span>
+      </div>
+    </div>
+  );
+};
+
+const EstimatePage = ({ estimate, isEditing, onUpdateItem, onDeleteItem, onUpdateMeta, masterItems, pageNumber = 1, cumulativeTotal = 0, isCoverPage = false, pageTotals = [] }: {
+  estimate: Estimate,
+  isEditing: boolean,
+  onUpdateItem: (idx: number, data: Partial<SlipItem>) => void,
+  onDeleteItem: (idx: number) => void,
+  onUpdateMeta: (data: Partial<Estimate>) => void,
+  masterItems: MaterialItem[],
+  pageNumber?: number,
+  cumulativeTotal?: number,
+  isCoverPage?: boolean,
+  pageTotals?: { page: number; total: number }[]
+}) => {
+  const [suggestionIdx, setSuggestionIdx] = useState<number | null>(null);
+  const [suggestionType, setSuggestionType] = useState<'name' | 'model' | null>(null);
+  const [query, setQuery] = useState('');
+
+  const suggestions = useMemo(() => {
+    if (!query.trim() || suggestionIdx === null) return [];
+    const keywords = query.toLowerCase().split(/[\s\u3000]+/).filter(k => k.length > 0);
+    return masterItems.filter(i => {
+      const text = `${i.name} ${i.model || ''} ${i.dimensions || ''}`.toLowerCase();
+      return keywords.every(k => text.includes(k));
+    }).slice(0, 8);
+  }, [query, masterItems, suggestionIdx]);
+
+  const handleSelect = (idx: number, item: MaterialItem) => {
+    onUpdateItem(idx, {
+      id: item.id,
+      name: item.name,
+      manufacturer: item.manufacturer,
+      model: item.model,
+      dimensions: item.dimensions,
+      unit: item.unit || '個',
+      listPrice: item.listPrice || 0,
+      appliedPrice: item.sellingPrice || 0,
+      category: item.category
+    });
+    setSuggestionIdx(null);
+    setSuggestionType(null);
+    setQuery('');
+  };
+
+  // Cover Page (Page 1)
+  if (isCoverPage) {
+    return (
+      <div className="bg-white p-10 text-slate-900 flex flex-col justify-between h-full w-full box-border min-h-[280mm] print:p-0 print:min-h-0 print:h-auto">
+        <div className="w-full">
+          <div className="flex justify-between items-end border-b-4 border-slate-900 pb-2 mb-6 print:mb-2 print:pb-1">
+            <h1 className="text-3xl font-serif font-bold tracking-[0.5em]">御見積書</h1>
+            <div className="text-right text-xs font-mono">
+              <p>No. {estimate.slipNumber || 'EST-PENDING'}</p>
+              <div className="flex items-center justify-end gap-1">
+                <span>日付:</span>
+                {isEditing ? (
+                  <input type="date" value={estimate.date} onChange={e => onUpdateMeta({ date: e.target.value })} className="border rounded px-1" />
+                ) : (
+                  <span>{estimate.date}</span>
+                )}
+              </div>
+              <div className="flex items-center justify-end gap-1 text-blue-600 font-bold">
+                <span>有効期限:</span>
+                {isEditing ? (
+                  <input type="date" value={estimate.validUntil} onChange={e => onUpdateMeta({ validUntil: e.target.value })} className="border rounded px-1" />
+                ) : (
+                  <span>{estimate.validUntil}</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-between mb-6 items-start print:mb-2">
+            <div className="w-[60%]">
+              <div className="flex items-center gap-2 mb-4">
+                {isEditing ? (
+                  <input type="text" value={estimate.customerName} onChange={e => onUpdateMeta({ customerName: e.target.value })} className="text-2xl font-bold border-b-2 border-slate-300 focus:border-blue-500 outline-none w-full" placeholder="顧客名を入力" />
+                ) : (
+                  <h2 className="text-2xl font-bold underline underline-offset-8 decoration-slate-300">{estimate.customerName} 御中</h2>
+                )}
+              </div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="bg-slate-800 text-white text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider shrink-0">現場</span>
+                {isEditing ? (
+                  <input type="text" value={estimate.constructionName || ''} onChange={e => onUpdateMeta({ constructionName: e.target.value })} className="text-lg font-bold border-b border-slate-200 outline-none w-full" placeholder="現場名を入力" />
+                ) : (
+                  <span className="text-lg font-bold">{estimate.constructionName || '一般・共通'}</span>
+                )}
+              </div>
+              <p className="text-[10px] mt-4 text-slate-500 font-bold tracking-tight border-l-4 border-slate-200 pl-3 leading-relaxed">下記の通り、御見積り申し上げます。（表示価格は全て税抜です）</p>
+            </div>
+            <div className="w-[40%] text-right text-[10px] flex flex-col items-end gap-3">
+              <div className="text-right leading-relaxed">
+                <h3 className="text-sm font-bold mb-1">{COMPANY_INFO.name}</h3>
+                <p>{COMPANY_INFO.zipCode} {COMPANY_INFO.address}</p>
+                <p className="mt-1 font-bold">TEL: {COMPANY_INFO.phone}</p>
+                <div className="flex justify-end gap-1 mt-1 font-bold">
+                  <span>担当:</span>
+                  {isEditing ? (
+                    <input type="text" value={estimate.receivingPerson || ''} onChange={e => onUpdateMeta({ receivingPerson: e.target.value })} className="border rounded px-1 w-24" placeholder="担当者" />
+                  ) : (
+                    <span>{estimate.receivingPerson || '本部'}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Page Totals Summary Table */}
+          <table className="w-full border-collapse table-fixed text-[10px] border-2 border-slate-900 mb-4" style={{ marginBottom: '8px' }}>
+            <thead>
+              <tr className="bg-slate-100 border-y-2 border-slate-900">
+                <th className="py-2 px-3 text-left border-r w-[70%]">ページ</th>
+                <th className="py-2 px-3 text-right w-[30%]">金額 (税抜)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pageTotals.map((pt, idx) => (
+                <tr key={idx} className="border-b border-slate-200" style={{ height: '9mm' }}>
+                  <td className="px-3 border-r font-bold">P{pt.page} - 内訳</td>
+                  <td className="px-3 text-right font-mono font-bold">¥{pt.total.toLocaleString()}</td>
+                </tr>
+              ))}
+              {Array.from({ length: Math.max(0, 16 - pageTotals.length) }).map((_, i) => (
+                <tr key={`empty-${i}`} className="border-b border-slate-200" style={{ height: '9mm' }}>
+                  <td className="border-r"></td>
+                  <td></td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="bg-slate-50 font-bold border-t-2 border-slate-900">
+                <td className="py-2.5 px-3 text-right border-r text-[10px] uppercase">小計 (税抜)</td>
+                <td className="py-2.5 px-3 text-right font-mono text-base">¥{(estimate.totalAmount || 0).toLocaleString()}</td>
+              </tr>
+              <tr className="bg-slate-50 font-bold">
+                <td className="py-2.5 px-3 text-right border-r text-[10px] uppercase">消費税 (10%)</td>
+                <td className="py-2.5 px-3 text-right font-mono text-base">¥{(estimate.taxAmount || 0).toLocaleString()}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <div className="text-[8px] text-slate-400 flex justify-between font-mono italic mt-4 shrink-0">
+          <span>ESTIMATE - COVER PAGE / TAX NOT INCLUDED IN ITEM PRICE</span>
+          <span>DAIEI KANKI Co., Ltd.</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Detail Page (Page 2+)
+  return (
+    <div className="bg-white p-10 text-slate-900 flex flex-col justify-between h-full w-full box-border min-h-[280mm] print:p-0 print:min-h-0 print:h-auto">
+      <div className="w-full">
+        {/* Simplified header for detail pages */}
+        <div className="flex justify-between items-center border-b-2 border-slate-300 pb-1 mb-3 print:mb-2">
+          <h2 className="text-lg font-bold">内訳 (Page {pageNumber})</h2>
+          <div className="text-xs text-slate-500">{estimate.customerName} 様 - {estimate.constructionName || '一般'}</div>
+        </div>
+
+        {/* Items table only */}
+        <div className="flex justify-between items-end border-b-4 border-slate-900 pb-2 mb-6 print:mb-2 print:pb-1">
+          <h1 className="text-3xl font-serif font-bold tracking-[0.5em]">御見積書</h1>
+          <div className="text-right text-xs font-mono">
+            <p>No. {estimate.slipNumber || 'EST-PENDING'}</p>
+            <div className="flex items-center justify-end gap-1">
+              <span>日付:</span>
+              {isEditing ? (
+                <input type="date" value={estimate.date} onChange={e => onUpdateMeta({ date: e.target.value })} className="border rounded px-1" />
+              ) : (
+                <span>{estimate.date}</span>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-1 text-blue-600 font-bold">
+              <span>有効期限:</span>
+              {isEditing ? (
+                <input type="date" value={estimate.validUntil} onChange={e => onUpdateMeta({ validUntil: e.target.value })} className="border rounded px-1" />
+              ) : (
+                <span>{estimate.validUntil}</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-between mb-6 items-start print:mb-2">
+          <div className="w-[60%]">
+            <div className="flex items-center gap-2 mb-4">
+              {isEditing ? (
+                <input type="text" value={estimate.customerName} onChange={e => onUpdateMeta({ customerName: e.target.value })} className="text-2xl font-bold border-b-2 border-slate-300 focus:border-blue-500 outline-none w-full" placeholder="顧客名を入力" />
+              ) : (
+                <h2 className="text-2xl font-bold underline underline-offset-8 decoration-slate-300">{estimate.customerName} 御中</h2>
+              )}
+            </div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="bg-slate-800 text-white text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider shrink-0">現場</span>
+              {isEditing ? (
+                <input type="text" value={estimate.constructionName || ''} onChange={e => onUpdateMeta({ constructionName: e.target.value })} className="text-lg font-bold border-b border-slate-200 outline-none w-full" placeholder="現場名を入力" />
+              ) : (
+                <span className="text-lg font-bold">{estimate.constructionName || '一般・共通'}</span>
+              )}
+            </div>
+            <p className="text-[10px] mt-4 text-slate-500 font-bold tracking-tight border-l-4 border-slate-200 pl-3 leading-relaxed">下記の通り、御見積り申し上げます。（表示価格は全て税抜です）</p>
+          </div>
+          <div className="w-[40%] text-right text-[10px] flex flex-col items-end gap-3">
+            <div className="text-right leading-relaxed">
+              <h3 className="text-sm font-bold mb-1">{COMPANY_INFO.name}</h3>
+              <p>{COMPANY_INFO.zipCode} {COMPANY_INFO.address}</p>
+              <p className="mt-1 font-bold">TEL: {COMPANY_INFO.phone}</p>
+              <div className="flex justify-end gap-1 mt-1 font-bold">
+                <span>担当:</span>
+                {isEditing ? (
+                  <input type="text" value={estimate.receivingPerson || ''} onChange={e => onUpdateMeta({ receivingPerson: e.target.value })} className="border rounded px-1 w-24 text-right" />
+                ) : (
+                  <span>{estimate.receivingPerson || '本部'}</span>
+                )}
+              </div>
+            </div>
+            <table className="border-collapse border border-slate-400 text-[8px] w-32 text-center h-12 shrink-0">
+              <tbody>
+                <tr>
+                  <td className="border border-slate-400 py-0.5 w-1/3 font-bold bg-slate-50 text-[7px]">承認</td>
+                  <td className="border border-slate-400 py-0.5 w-1/3 font-bold bg-slate-50 text-[7px]">検印</td>
+                  <td className="border border-slate-400 py-0.5 w-1/3 font-bold bg-slate-50 text-[7px]">担当</td>
+                </tr>
+                <tr className="h-10">
+                  <td className="border border-slate-400"></td>
+                  <td className="border border-slate-400"></td>
+                  <td className="border border-slate-400"></td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div className="mt-2 border-2 border-slate-800 p-2 bg-slate-50 inline-block min-w-[220px]">
+              <div className="text-center font-bold text-[8px] border-b border-slate-300 pb-1 mb-1 text-slate-500 uppercase tracking-widest">御見積合計 (税込)</div>
+              <div className="text-2xl font-mono font-black text-center whitespace-nowrap px-2">¥{(estimate.grandTotal || 0).toLocaleString()}-</div>
+            </div>
+          </div>
+        </div>
+
+        <table className="w-full border-collapse table-fixed text-[10px] border-l-2 border-r-2 border-b-2 border-slate-900">
+          <thead>
+            <tr className="bg-slate-100 border-y-2 border-slate-900">
+              <th className="py-2 px-1 w-[4%] border-r text-center">No</th>
+              <th className="py-2 px-2 text-left border-r w-[26%]">品名 / メーカー</th>
+              <th className="py-2 px-2 text-left border-r w-[22%]">型式 / 寸法</th>
+              <th className="py-2 px-2 text-right border-r w-[8%]">数量</th>
+              <th className="py-2 px-1 text-center border-r w-[6%]">単位</th>
+              <th className="py-2 px-2 text-right border-r w-[11%] text-slate-400">定価(抜)</th>
+              <th className="py-2 px-2 text-right border-r w-[11%]">売価(抜)</th>
+              <th className="py-2 px-2 text-right w-[12%]">金額</th>
+              {isEditing && <th className="w-8 no-print border-l"></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from({ length: 16 }).map((_, idx) => {
+              const item = estimate.items?.[idx];
+              const amount = item ? (item.appliedPrice || 0) * (item.quantity || 0) : 0;
+
+              if (!item && !isEditing) {
+                return (
+                  <tr key={`empty-${idx}`} className="border-b h-[10.5mm] print:h-[9mm] border-slate-200">
+                    <td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td></td>
+                  </tr>
+                );
+              }
+
+              const displayItem = item || { name: '', model: '', dimensions: '', quantity: 0, unit: '個', listPrice: 0, appliedPrice: 0, manufacturer: '' };
+
+              return (
+                <tr key={idx} className="border-b h-[10.5mm] print:h-[9mm] border-slate-200 group">
+                  <td className="text-center border-r text-[9px] font-mono">{idx + 1}</td>
+                  <td className="px-2 border-r relative">
+                    {isEditing ? (
+                      <div className="flex flex-col">
+                        <input
+                          type="text"
+                          value={displayItem.name}
+                          onChange={e => {
+                            onUpdateItem(idx, { name: e.target.value });
+                            setQuery(e.target.value);
+                            setSuggestionIdx(idx);
+                            setSuggestionType('name');
+                          }}
+                          onFocus={() => { setSuggestionIdx(idx); setSuggestionType('name'); setQuery(displayItem.name); }}
+                          className="w-full bg-blue-50 font-bold outline-none"
+                          placeholder="品名"
+                        />
+                        <input
+                          type="text"
+                          value={displayItem.manufacturer || ''}
+                          onChange={e => onUpdateItem(idx, { manufacturer: e.target.value })}
+                          className="w-full bg-blue-50 outline-none text-[8px]"
+                          placeholder="メーカー"
+                        />
+                        {suggestionIdx === idx && suggestionType === 'name' && suggestions.length > 0 && (
+                          <div className="absolute left-0 top-full mt-1 w-[200%] max-w-sm bg-white shadow-2xl border-2 border-blue-500 rounded-xl z-[200] overflow-hidden animate-in fade-in slide-in-from-top-2">
+                            {suggestions.map(s => (
+                              <button key={s.id} onClick={() => handleSelect(idx, s)} className="w-full text-left p-3 hover:bg-blue-50 border-b flex flex-col gap-1">
+                                <span className="font-black text-xs text-slate-900">{s.name}</span>
+                                <span className="text-[9px] text-slate-500 font-mono">{s.model} {s.dimensions}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex flex-col">
+                        <span className="font-bold">{displayItem.name}</span>
+                        {displayItem.manufacturer && <span className="text-[8px] text-slate-500 font-normal leading-tight">{displayItem.manufacturer}</span>}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-2 border-r relative font-medium">
+                    {isEditing ? (
+                      <div className="flex flex-col">
+                        <input
+                          type="text"
+                          value={displayItem.model || ''}
+                          onChange={e => {
+                            onUpdateItem(idx, { model: e.target.value });
+                            setQuery(e.target.value);
+                            setSuggestionIdx(idx);
+                            setSuggestionType('model');
+                          }}
+                          onFocus={() => { setSuggestionIdx(idx); setSuggestionType('model'); setQuery(displayItem.model || ''); }}
+                          className="bg-blue-50 outline-none text-[8px]"
+                          placeholder="型式"
+                        />
+                        <input
+                          type="text"
+                          value={displayItem.dimensions || ''}
+                          onChange={e => onUpdateItem(idx, { dimensions: e.target.value })}
+                          className="bg-blue-50 outline-none text-[8px]"
+                          placeholder="寸法"
+                        />
+                        {suggestionIdx === idx && suggestionType === 'model' && suggestions.length > 0 && (
+                          <div className="absolute left-0 top-full mt-1 w-[200%] max-sm bg-white shadow-2xl border-2 border-blue-500 rounded-xl z-[200] overflow-hidden animate-in fade-in slide-in-from-top-2">
+                            {suggestions.map(s => (
+                              <button key={s.id} onClick={() => handleSelect(idx, s)} className="w-full text-left p-3 hover:bg-blue-50 border-b flex flex-col gap-1">
+                                <span className="font-black text-xs text-slate-900">{s.name}</span>
+                                <span className="text-[9px] text-slate-500 font-mono">{s.model} {s.dimensions}</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="truncate">{displayItem.model} {displayItem.dimensions}</span>
+                    )}
+                  </td>
+                  <td className="px-2 text-right border-r font-mono">
+                    {isEditing ? (
+                      <input type="number" value={displayItem.quantity || ''} onChange={e => onUpdateItem(idx, { quantity: Number(e.target.value) })} className="w-full text-right bg-blue-50 font-black outline-none" />
+                    ) : (
+                      <span>{displayItem.quantity > 0 ? displayItem.quantity.toLocaleString() : ''}</span>
+                    )}
+                  </td>
+                  <td className="px-1 text-center border-r font-medium">
+                    {isEditing ? (
+                      <input type="text" value={displayItem.unit} onChange={e => onUpdateItem(idx, { unit: e.target.value })} className="w-full text-center bg-blue-50 outline-none" />
+                    ) : (
+                      <span>{displayItem.unit}</span>
+                    )}
+                  </td>
+                  <td className="px-2 text-right border-r font-mono text-slate-400">
+                    {isEditing ? (
+                      <input type="number" value={displayItem.listPrice || ''} onChange={e => onUpdateItem(idx, { listPrice: Number(e.target.value) })} className="w-full text-right bg-slate-50 font-bold outline-none" />
+                    ) : (
+                      <span>{displayItem.listPrice > 0 ? `¥${displayItem.listPrice.toLocaleString()}` : ''}</span>
+                    )}
+                  </td>
+                  <td className="px-2 text-right border-r font-mono">
+                    {isEditing ? (
+                      <input type="number" value={displayItem.appliedPrice || ''} onChange={e => onUpdateItem(idx, { appliedPrice: Number(e.target.value) })} className="w-full text-right bg-blue-50 font-black outline-none" />
+                    ) : (
+                      <span className="font-bold">{displayItem.appliedPrice > 0 ? `¥${displayItem.appliedPrice.toLocaleString()}` : ''}</span>
+                    )}
+                  </td>
+                  <td className="px-2 text-right font-mono font-bold">{amount > 0 ? `¥${amount.toLocaleString()}` : ''}</td>
+                  {isEditing && (
+                    <td className="p-1 no-print border-l text-center">
+                      <button onClick={() => onDeleteItem(idx)} className="text-rose-500 hover:scale-110 transition-transform"><Trash2 size={14} /></button>
+                    </td>
+                  )}
+                </tr>
+              );
+            })
+            }
+          </tbody>
+          <tfoot>
+            {pageNumber === 1 ? (
+              <>
+                <tr className="bg-slate-50 font-bold border-t-2 border-slate-900">
+                  <td colSpan={7} className="py-2.5 px-3 text-right border-r text-[10px] uppercase">小計 (税抜)</td>
+                  <td className="py-2.5 px-2 text-right font-mono text-base">¥{(estimate.totalAmount || 0).toLocaleString()}</td>
+                  {isEditing && <td></td>}
+                </tr>
+                <tr className="bg-slate-50 font-bold">
+                  <td colSpan={7} className="py-2.5 px-3 text-right border-r text-[10px] uppercase">消費税 (10%)</td>
+                  <td className="py-2.5 px-2 text-right font-mono text-base">¥{(estimate.taxAmount || 0).toLocaleString()}</td>
+                  {isEditing && <td></td>}
+                </tr>
+              </>
+            ) : (
+              <>
+                <tr className="bg-slate-50 font-bold border-t-2 border-slate-900">
+                  <td colSpan={7} className="py-2.5 px-3 text-right border-r text-[10px] uppercase">当頁小計 (税抜)</td>
+                  <td className="py-2.5 px-2 text-right font-mono text-base">¥{(estimate.items || []).reduce((sum, item) => sum + ((item.appliedPrice || 0) * (item.quantity || 0)), 0).toLocaleString()}</td>
+                  {isEditing && <td></td>}
+                </tr>
+                <tr className="bg-slate-50 font-bold">
+                  <td colSpan={7} className="py-2.5 px-3 text-right border-r text-[10px] uppercase">前頁累計 (税抜)</td>
+                  <td className="py-2.5 px-2 text-right font-mono text-base">¥{cumulativeTotal.toLocaleString()}</td>
+                  {isEditing && <td></td>}
+                </tr>
+              </>
+            )}
+          </tfoot>
+        </table>
+      </div>
+      <div className="text-[8px] text-slate-400 flex justify-between font-mono italic mt-4 shrink-0">
+        <span>ESTIMATE - BREAKDOWN LIST / TAX NOT INCLUDED IN ITEM PRICE</span>
+        <span>DAIEI KANKI Co., Ltd.</span>
+      </div>
+    </div>
+  );
+};
+
+export const EstimateManager: React.FC<EstimateManagerProps> = ({ onClose, onConvertToSlip, masterItems }) => {
+  const [estimates, setEstimates] = useState<Estimate[]>([]);
+  const [selectedEstimate, setSelectedEstimate] = useState<Estimate | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isAIScanning, setIsAIScanning] = useState(false);
+  const [previewScale, setPreviewScale] = useState(1);
+  const aiInputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (!containerRef.current) return;
+      const availableWidth = containerRef.current.clientWidth - 64;
+      const a4Width = 794; // 210mm @ 96dpi
+      const scale = Math.min(availableWidth / a4Width, 1.0);
+      setPreviewScale(scale > 0 ? scale : 1);
+    };
+
+    const observer = new ResizeObserver(handleResize);
+    if (containerRef.current) observer.observe(containerRef.current);
+
+    window.addEventListener('resize', handleResize);
+    handleResize();
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      observer.disconnect();
+    };
+  }, [selectedEstimate]);
+
+  useEffect(() => {
+    const unsub = storage.subscribeToEstimates(setEstimates);
+    setIsLoading(false);
+    return unsub;
+  }, []);
+
+  const filteredEstimates = useMemo(() => {
+    const q = searchQuery.toLowerCase();
+    return estimates.filter(e => e.customerName.toLowerCase().includes(q) || (e.constructionName || '').toLowerCase().includes(q));
+  }, [estimates, searchQuery]);
+
+  const handleUpdateMeta = (data: Partial<Estimate>) => {
+    if (!selectedEstimate) return;
+    recalculate(selectedEstimate.items, data);
+  };
+
+  const createEmptyItem = (idx: number): SlipItem => ({
+    id: `man-${Date.now()}-${idx}`,
+    name: '',
+    category: '消耗品・雑材',
+    model: '',
+    dimensions: '',
+    quantity: 0,
+    unit: '個',
+    appliedPrice: 0,
+    costPrice: 0,
+    listPrice: 0,
+    sellingPrice: 0,
+    location: '手入力',
+    updatedAt: Date.now()
+  });
+
+  const padItems = (items: SlipItem[]): SlipItem[] => {
+    const list = [...(items || [])];
+    const targetLength = Math.max(16, Math.ceil(list.length / 16) * 16);
+    while (list.length < targetLength) {
+      list.push(createEmptyItem(list.length));
+    }
+    return list;
+  };
+
+  const handleNewEstimate = async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const valid = new Date(); valid.setDate(valid.getDate() + 30);
+    const newEst: Omit<Estimate, 'id'> = {
+      createdAt: Date.now(),
+      date: today,
+      validUntil: valid.toISOString().slice(0, 10),
+      customerName: '新規顧客',
+      constructionName: '',
+      items: padItems([]),
+      totalAmount: 0,
+      taxAmount: 0,
+      grandTotal: 0,
+      status: 'pending',
+      deliveryTime: 'none',
+      deliveryDestination: 'none',
+      slipNumber: `EST-${generateId().slice(0, 6).toUpperCase()}`
+    };
+    try {
+      const docRef = await storage.addEstimate(newEst);
+      const saved = { ...newEst, id: docRef.id } as Estimate;
+      setSelectedEstimate(saved);
+      setIsEditing(true);
+    } catch (e) {
+      alert('新規見積の作成に失敗しました。');
+    }
+  };
+
+  const handleUpdateItem = (idx: number, data: Partial<SlipItem>) => {
+    if (!selectedEstimate) return;
+    const newItems = [...selectedEstimate.items];
+    newItems[idx] = { ...newItems[idx], ...data };
+    recalculate(newItems, {});
+  };
+
+  const recalculate = (items: SlipItem[], meta: Partial<Estimate>) => {
+    const total = items.reduce((s, i) => s + ((i.appliedPrice || 0) * (i.quantity || 0)), 0);
+    setSelectedEstimate(prev => prev ? { ...prev, ...meta, items, totalAmount: total, taxAmount: Math.floor(total * 0.1), grandTotal: Math.floor(total * 1.1) } : null);
+  };
+
+  const handleSave = async () => {
+    if (!selectedEstimate) return;
+    if (!selectedEstimate.id) {
+      alert('エラー: 見積IDが見つかりません。新規作成し直してください。');
+      return;
+    }
+    try {
+      await storage.updateEstimate(selectedEstimate.id, selectedEstimate);
+      setIsEditing(false);
+    } catch (e: any) {
+      console.error("Save Error:", e);
+      alert(`保存に失敗しました: ${e.message || '不明なエラー'}`);
+    }
+  };
+
+  const handleAdoptAndConvert = async () => {
+    if (!selectedEstimate || !onConvertToSlip) return;
+    if (window.confirm('この見積を「採用」として確定し、伝票作成カートへ連携しますか？マスター未登録の資材は自動登録されます。')) {
+      await storage.updateEstimate(selectedEstimate.id, { status: 'accepted' });
+      const validItems = selectedEstimate.items.filter(i => i.name.trim() !== '');
+      onConvertToSlip(validItems, selectedEstimate.customerName, selectedEstimate.constructionName);
+      onClose();
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[150] flex items-center justify-center p-4">
+      <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-7xl h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95">
+        <div className="p-3 sm:p-6 border-b flex justify-between items-center bg-slate-50/50 no-print">
+          <div className="flex items-center gap-2 sm:gap-4">
+            <div className="w-8 h-8 sm:w-12 sm:h-12 bg-amber-100 text-amber-600 rounded-xl sm:rounded-2xl flex items-center justify-center shadow-sm font-bold"><FileText size={16} className="sm:hidden" /><FileText size={24} className="hidden sm:block" /></div>
+            <div><h2 className="text-base sm:text-2xl font-black text-slate-900 tracking-tight">見積管理</h2><p className="hidden sm:block text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5 font-mono">ESTIMATE MANAGEMENT SYSTEM PRO</p></div>
+          </div>
+          <div className="flex items-center gap-1 sm:gap-3">
+            <button onClick={onClose} className="p-1.5 sm:p-2 hover:bg-slate-100 rounded-xl transition-all"><X size={20} className="sm:hidden" /><X size={28} className="hidden sm:block" /></button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
+          <div className="w-full md:w-1/3 border-b md:border-b-0 md:border-r bg-slate-50 flex flex-col no-print max-h-[40vh] md:max-h-none">
+            <div className="p-2 sm:p-4 border-b bg-white space-y-2 sm:space-y-3">
+              <button onClick={handleNewEstimate} className="w-full flex items-center justify-center gap-1.5 sm:gap-2 bg-amber-500 text-white py-2 sm:py-3 rounded-xl sm:rounded-2xl text-[10px] sm:text-xs font-black shadow-lg hover:bg-amber-600 transition-all active:scale-95">
+                <Plus size={14} className="sm:hidden" /><Plus size={18} className="hidden sm:block" /> <span className="hidden sm:inline">新規</span>見積作成
+              </button>
+              <div className="relative">
+                <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
+                <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="顧客・現場名で検索..." className="w-full pl-10 pr-4 py-1.5 sm:py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-bold outline-none focus:ring-2 focus:ring-amber-500 transition-all" />
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 sm:p-4 space-y-2 sm:space-y-3">
+              {filteredEstimates.map(e => (
+                <div key={e.id} onClick={() => { setSelectedEstimate({ ...e, items: padItems(e.items) }); setIsEditing(false); }} className={`p-2.5 sm:p-4 rounded-xl sm:rounded-2xl border transition-all cursor-pointer group ${selectedEstimate?.id === e.id ? 'bg-amber-50 border-amber-300 shadow-md' : 'bg-white hover:border-amber-200 hover:shadow-sm'}`}>
+                  <div className="flex justify-between items-start mb-1.5 sm:mb-2"><span className="text-[8px] sm:text-[9px] font-black text-slate-400 font-mono">#{e.slipNumber}</span><span className={`text-[8px] sm:text-[9px] font-black px-1.5 sm:px-2 py-0.5 rounded-full uppercase ${e.status === 'accepted' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{e.status === 'accepted' ? '採用' : '見積中'}</span></div>
+                  <h4 className="font-black text-slate-900 text-xs sm:text-sm truncate">{e.customerName}</h4>
+                  <p className="text-[9px] sm:text-[10px] text-slate-500 font-bold truncate">現場: {e.constructionName || '未指定'}</p>
+                  <div className="mt-2 sm:mt-3 flex justify-between items-end gap-2"><span className="text-[8px] sm:text-[9px] text-slate-400 font-bold shrink-0">{e.date}</span><span className="text-xs sm:text-sm font-black text-amber-600 font-mono truncate">¥{(e.grandTotal || 0).toLocaleString()}</span></div>
+                </div>
+              ))}
+              {filteredEstimates.length === 0 && <div className="text-center py-20 text-slate-300 text-xs font-bold uppercase tracking-widest">見積データがありません</div>}
+            </div>
+          </div>
+
+          <div className="flex-1 bg-slate-200/30 overflow-auto flex justify-center items-start relative box-border" ref={containerRef}>
+            {selectedEstimate ? (
+              <div className="flex flex-col items-center gap-6 w-full py-8" style={{ minWidth: `calc(210mm * ${previewScale} + 64px)` }}>
+                <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-2 sm:gap-0 no-print bg-white p-2 sm:p-4 rounded-xl sm:rounded-2xl shadow-xl sticky top-2 sm:top-4 z-10 border border-slate-200" style={{ width: `calc(210mm * ${previewScale})`, minWidth: '280px' }}>
+                  <div className="flex gap-1.5 sm:gap-2 justify-center">
+                    {isEditing ? (<><button onClick={handleSave} className="bg-blue-600 text-white px-3 sm:px-6 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-black flex items-center gap-1 sm:gap-2 shadow-lg active:scale-95 hover:bg-blue-700"><Save size={14} className="sm:hidden" /><Save size={18} className="hidden sm:block" /> <span className="hidden sm:inline">保存</span></button><button onClick={() => setIsEditing(false)} className="bg-slate-100 px-3 sm:px-6 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-black hover:bg-slate-200">キャンセル</button></>) : (
+                      <><button onClick={() => setIsEditing(true)} className="bg-slate-900 text-white px-3 sm:px-6 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-black flex items-center gap-1 sm:gap-2 hover:bg-slate-800 transition-all shadow-md"><Edit3 size={14} className="sm:hidden" /><Edit3 size={18} className="hidden sm:block" /> <span className="hidden sm:inline">編集</span></button>
+                        <button onClick={handleAdoptAndConvert} className="bg-emerald-600 text-white px-3 sm:px-6 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-black flex items-center gap-1 sm:gap-2 shadow-lg hover:bg-emerald-700 transition-all"><ShoppingCart size={14} className="sm:hidden" /><ShoppingCart size={18} className="hidden sm:block" /> <span className="hidden sm:inline">採用・</span>伝票へ</button>
+                      </>
+                    )}
+                  </div>
+                  <div className="flex gap-1.5 sm:gap-3 justify-center">
+                    <div className="flex items-center gap-1 bg-slate-100 px-1.5 sm:px-2 py-1 sm:py-1.5 rounded-lg sm:rounded-xl border border-slate-200">
+                      <button onClick={() => setPreviewScale(s => Math.max(0.3, s - 0.1))} className="p-0.5 sm:p-1 hover:bg-slate-200 rounded text-slate-600 transition-colors"><Minus size={14} className="sm:hidden" /><Minus size={16} className="hidden sm:block" /></button>
+                      <span className="text-[10px] sm:text-xs font-mono font-bold text-slate-600 w-8 sm:w-12 text-center">{Math.round(previewScale * 100)}%</span>
+                      <button onClick={() => setPreviewScale(s => Math.min(3.0, s + 0.1))} className="p-0.5 sm:p-1 hover:bg-slate-200 rounded text-slate-600 transition-colors"><Plus size={14} className="sm:hidden" /><Plus size={16} className="hidden sm:block" /></button>
+                    </div>
+                    <button onClick={() => window.print()} className="bg-slate-100 text-slate-900 border border-slate-200 px-3 sm:px-6 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-black flex items-center gap-1 sm:gap-2 hover:bg-slate-200 transition-all shadow-sm"><Printer size={14} className="sm:hidden" /><Printer size={18} className="hidden sm:block" /> <span className="hidden sm:inline">印刷</span></button>
+                    <button onClick={async () => window.confirm('見積データを削除しますか？') && storage.deleteEstimate(selectedEstimate.id)} className="p-2 sm:p-2.5 text-rose-500 hover:bg-rose-50 rounded-lg sm:rounded-xl transition-all"><Trash2 size={16} className="sm:hidden" /><Trash2 size={20} className="hidden sm:block" /></button>
+                  </div>
+                </div>
+
+                {(() => {
+                  const allItems = selectedEstimate.items || [];
+                  const numDetailPages = Math.max(1, Math.ceil(allItems.length / 16));
+
+                  // Calculate totals for each detail page
+                  const pageTotals = Array.from({ length: numDetailPages }).map((_, idx) => {
+                    const startIdx = idx * 16;
+                    const pageItems = allItems.slice(startIdx, startIdx + 16);
+                    const total = pageItems.reduce((sum, item) => sum + ((item.appliedPrice || 0) * (item.quantity || 0)), 0);
+                    return { page: idx + 1, total };
+                  });
+
+                  return (
+                    <>
+                      {Array.from({ length: 1 + numDetailPages }).map((_, pageIdx) => {
+                        const detailPageIdx = pageIdx - 1; // pageIdx 0 = cover, 1+ = detail pages
+                        const startIdx = detailPageIdx * 16;
+                        const pageItems = pageIdx === 0 ? [] : allItems.slice(startIdx, startIdx + 16);
+                        const paddedItems = [...Array(16)].map((_, i) => pageItems[i] || { name: '', model: '', dimensions: '', quantity: 0, unit: '個', listPrice: 0, appliedPrice: 0, manufacturer: '' });
+
+
+                        return (
+                          <div
+                            key={pageIdx === 0 ? "cover" : `detail-${detailPageIdx}`}
+                            id={pageIdx === 0 ? "print-target" : undefined}
+                            className="estimate-print-page bg-white shadow-2xl w-full print:shadow-none print:m-0 box-border origin-top transition-transform duration-200"
+                            style={{
+                              width: '210mm',
+                              minHeight: '297mm',
+                              transform: `scale(${previewScale})`,
+                              pageBreakAfter: pageIdx < numDetailPages ? 'always' : 'auto'
+                            }}
+                          >
+                            {pageIdx === 0 ? (
+                              <EstimateCoverPage
+                                estimate={selectedEstimate}
+                                isEditing={isEditing}
+                                onUpdateMeta={handleUpdateMeta}
+                                pageTotals={pageTotals}
+                              />
+                            ) : (
+                              <EstimateDetailPage
+                                estimate={{ ...selectedEstimate, items: paddedItems }}
+                                pageNumber={pageIdx}
+                                isEditing={isEditing}
+                                onUpdateItem={(idx, data) => handleUpdateItem(startIdx + idx, data)}
+                                onDeleteItem={(i) => handleUpdateItem(startIdx + i, { name: '', quantity: 0, appliedPrice: 0, listPrice: 0, model: '', dimensions: '', manufacturer: '' })}
+                                masterItems={masterItems}
+                              />
+                            )}
+                          </div>
+                        );
+                      })}
+
+                      {isEditing && (
+                        <button
+                          onClick={() => {
+                            const currentItems = selectedEstimate.items || [];
+                            const startIdx = currentItems.length;
+                            const newRows = Array.from({ length: 16 }).map((_, i) => createEmptyItem(startIdx + i));
+                            setSelectedEstimate({ ...selectedEstimate, items: [...currentItems, ...newRows] });
+                          }}
+                          className="bg-amber-500 text-white px-8 py-4 rounded-2xl text-sm font-black flex items-center gap-3 shadow-lg hover:bg-amber-600 transition-all active:scale-95 no-print"
+                        >
+                          <Plus size={24} /> ページを追加 (16行)
+                        </button>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-slate-300">
+                <FileText size={80} className="opacity-10 mb-4" />
+                <p className="text-sm font-black uppercase tracking-widest opacity-30">見積データを選択、または新規作成してください</p>
+                <div className="mt-6 p-4 bg-white/50 border border-slate-200 rounded-2xl flex items-center gap-3">
+                  <div className="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center">
+                    <Sparkles size={20} />
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-bold leading-tight">
+                    FAXなどの画像から見積を作成する場合は、<br />
+                    右下の<span className="text-indigo-600">AI高橋さん</span>に写真を送ってください。
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <style>{`
+        @media print {
+          @page { size: A4; margin: 0; }
+          .no-print { display: none !important; }
+          
+          * { 
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+
+          /* Reset all potential clipping containers */
+          .fixed.inset-0, 
+          .fixed.inset-0 > div,
+          .bg-slate-200\\/30,
+          .py-8,
+          .overflow-auto {
+            position: static !important;
+            display: block !important;
+            overflow: visible !important;
+            height: auto !important;
+            max-height: none !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            transform: none !important;
+            box-shadow: none !important;
+            background: white !important;
+          }
+
+          #print-target,
+          .estimate-print-page {
+            display: block !important;
+            width: 210mm !important;
+            height: auto !important;
+            margin: 0 !important;
+            background: white !important;
+            box-sizing: border-box !important;
+          }
+
+          /* Reinforce borders for print */
+          table { border-collapse: collapse !important; width: 100% !important; }
+          th, td { border: 1px solid #e2e8f0 !important; }
+          .border-slate-900 { border-color: #0f172a !important; }
+          .border-slate-200 { border-color: #e2e8f0 !important; }
+
+          body, html {
+            height: auto !important;
+            overflow: visible !important;
+            background: white !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+        }
+      `}</style>
+    </div>
+  );
+};
