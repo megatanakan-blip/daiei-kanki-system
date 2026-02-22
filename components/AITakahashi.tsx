@@ -37,11 +37,13 @@ interface AITakahashiProps {
   onAddToCart: (items: any[]) => void;
   onUpdateInfo: (info: { customerName?: string; siteName?: string; destination?: string }) => void;
   onCreateEstimate: (items: any[]) => void;
+  onRegisterItems: (items: any[]) => void;
   helpMessage?: string;
   welcomeMessage?: string;
+  currentScreen?: 'TOP' | 'SLIP_CREATE' | 'ESTIMATE_MANAGER' | 'MASTER_MANAGEMENT' | 'QUICK_SEARCH' | 'PO_MANAGER' | 'SETTINGS';
 }
 
-export const AITakahashi: React.FC<AITakahashiProps> = ({ masterItems, onAddToCart, onUpdateInfo, onCreateEstimate, helpMessage, welcomeMessage }) => {
+export const AITakahashi: React.FC<AITakahashiProps> = ({ masterItems, onAddToCart, onUpdateInfo, onCreateEstimate, onRegisterItems, helpMessage, welcomeMessage, currentScreen = 'TOP' }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -122,6 +124,8 @@ export const AITakahashi: React.FC<AITakahashiProps> = ({ masterItems, onAddToCa
       onUpdateInfo(action.payload);
     } else if (action.type === 'CREATE_ESTIMATE') {
       onCreateEstimate(Array.isArray(action.payload) ? action.payload : [action.payload]);
+    } else if (action.type === 'REGISTER_ITEMS') {
+      onRegisterItems(Array.isArray(action.payload) ? action.payload : [action.payload]);
     }
 
     action.executed = true;
@@ -168,7 +172,7 @@ export const AITakahashi: React.FC<AITakahashiProps> = ({ masterItems, onAddToCa
         parts: userMsg.parts
       });
 
-      const response = await gemini.chatWithTakahashi(chatHistory, masterItems);
+      const response = await gemini.chatWithTakahashi(chatHistory, masterItems, currentScreen);
       let fullText = response.text || "";
 
       const sources: Source[] = [];
@@ -252,7 +256,14 @@ export const AITakahashi: React.FC<AITakahashiProps> = ({ masterItems, onAddToCa
                 <div className={`max-w-[95%] sm:max-w-[90%] p-3 sm:p-4 rounded-2xl sm:rounded-3xl text-[11px] sm:text-xs font-bold leading-relaxed shadow-sm ${m.role === 'user' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white text-slate-800 border border-slate-100 rounded-tl-none'}`}>
                   {m.imagePreview && (
                     <div className="mb-3 rounded-xl overflow-hidden border-2 border-white/20 shadow-inner">
-                      <img src={m.imagePreview} alt="User Upload" className="w-full h-auto object-cover max-h-40 sm:max-h-48" />
+                      {m.imagePreview.startsWith('data:application/pdf') ? (
+                        <div className="w-full h-32 bg-slate-800 flex flex-col items-center justify-center gap-2">
+                          <FileText size={40} className="text-white/50" />
+                          <span className="text-[10px] text-white/50 font-black">PDF DOCUMENT</span>
+                        </div>
+                      ) : (
+                        <img src={m.imagePreview} alt="User Upload" className="w-full h-auto object-cover max-h-40 sm:max-h-48" />
+                      )}
                     </div>
                   )}
                   {m.parts.map((part, pIdx) => (
@@ -265,7 +276,7 @@ export const AITakahashi: React.FC<AITakahashiProps> = ({ masterItems, onAddToCa
                     <div key={actionIdx} className={`mt-4 overflow-hidden rounded-xl sm:rounded-2xl border-2 transition-all ${action.executed ? 'border-emerald-100 bg-emerald-50 text-emerald-800' : 'border-blue-100 bg-white shadow-md'}`}>
                       <div className={`px-3 py-2 text-[8px] sm:text-[9px] font-black uppercase tracking-widest flex items-center gap-2 ${action.executed ? 'bg-emerald-100' : 'bg-blue-50 text-blue-600'}`}>
                         {action.executed ? <CheckCircle size={10} /> : <ShoppingCart size={10} />}
-                        {action.type === 'ADD_CART' ? 'カート追加' : action.type === 'CREATE_ESTIMATE' ? '見積作成' : '情報の更新'}
+                        {action.type === 'ADD_CART' ? 'カート追加' : action.type === 'CREATE_ESTIMATE' ? '見積作成' : action.type === 'REGISTER_ITEMS' ? 'マスター登録' : '情報の更新'}
                       </div>
                       <div className="p-2 sm:p-3">
                         {action.type === 'ADD_CART' || action.type === 'CREATE_ESTIMATE' ? (
@@ -274,6 +285,14 @@ export const AITakahashi: React.FC<AITakahashiProps> = ({ masterItems, onAddToCa
                               <div key={i} className="flex justify-between items-center text-[9px] sm:text-[10px] font-mono bg-slate-50/50 p-1 rounded">
                                 <span className="truncate flex-1">・{item.name}</span>
                                 <span className="font-black ml-2">{item.quantity}個</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : action.type === 'REGISTER_ITEMS' ? (
+                          <div className="space-y-1 mb-2 sm:mb-3">
+                            {(Array.isArray(action.payload) ? action.payload : [action.payload]).map((item: any, i: number) => (
+                              <div key={i} className="flex justify-between items-center text-[9px] sm:text-[10px] font-mono bg-slate-50/50 p-1 rounded">
+                                <span className="truncate flex-1">・{item.name} ({item.dimensions})</span>
                               </div>
                             ))}
                           </div>
@@ -344,7 +363,13 @@ export const AITakahashi: React.FC<AITakahashiProps> = ({ masterItems, onAddToCa
           <div className="p-3 sm:p-4 border-t bg-white shrink-0 shadow-[0_-4px_20px_rgba(0,0,0,0.03)] space-y-3">
             {selectedImage && (
               <div className="relative w-16 h-16 rounded-lg overflow-hidden border-2 border-blue-100 shadow-md">
-                <img src={`data:${selectedImage.file.type};base64,${selectedImage.base64}`} className="w-full h-full object-cover" />
+                {selectedImage.file.type === 'application/pdf' ? (
+                  <div className="w-full h-full bg-slate-800 flex items-center justify-center">
+                    <FileText size={24} className="text-white/50" />
+                  </div>
+                ) : (
+                  <img src={`data:${selectedImage.file.type};base64,${selectedImage.base64}`} className="w-full h-full object-cover" />
+                )}
                 <button onClick={() => setSelectedImage(null)} className="absolute top-0 right-0 bg-rose-500 text-white p-1 rounded-bl-md shadow-md">
                   <X size={10} />
                 </button>
@@ -358,7 +383,7 @@ export const AITakahashi: React.FC<AITakahashiProps> = ({ masterItems, onAddToCa
               >
                 <Camera size={18} />
               </button>
-              <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept="image/*" />
+              <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept="image/*,application/pdf" />
 
               <div className="relative flex-1">
                 <input

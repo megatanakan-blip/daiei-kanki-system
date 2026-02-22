@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Plus, Package, Search, Loader2, Settings, ClipboardList, Trash2, X, Sparkles, Cloud, Zap, FolderTree, RotateCcw, Save, FileText, Calculator, ArrowRight, CheckCircle2, ChevronDown, LayoutGrid, Droplet, Layers, CircleDot, Box, Wrench, Thermometer, Hammer, Anchor, ShieldCheck, ThermometerSnowflake, Container, Gauge, Construction, Settings2, UserCheck, SearchCode, Database, History, TrendingUp } from 'lucide-react';
-import { MaterialItem, SortConfig, SortField, PricingRule, SlipItem, Slip, Customer, MATERIAL_CATEGORIES, DeliveryDestination, Estimate } from './types';
+import { Plus, Package, Search, Loader2, Settings, ClipboardList, Trash2, X, Sparkles, Cloud, Zap, FolderTree, RotateCcw, Save, FileText, Calculator, ArrowRight, CheckCircle2, ChevronDown, LayoutGrid, Droplet, Layers, CircleDot, Box, Wrench, Thermometer, Hammer, Anchor, ShieldCheck, ThermometerSnowflake, Container, Gauge, Construction, Settings2, UserCheck, SearchCode, Database, History, TrendingUp, ShoppingCart, AlertTriangle } from 'lucide-react';
+import { MaterialItem, SortConfig, SortField, PricingRule, SlipItem, Slip, Customer, MATERIAL_CATEGORIES, DeliveryDestination, Estimate, AppSettings } from './types';
 import { MaterialForm } from './components/MaterialForm';
 import { MaterialTable } from './components/MaterialTable';
 import { MaterialQuickSearch } from './components/MaterialQuickSearch';
@@ -10,7 +10,10 @@ import { PricingManager } from './components/PricingManager';
 import { SlipManager } from './components/SlipManager';
 import { EstimateManager } from './components/EstimateManager';
 import { MaterialPrintPage } from './components/MaterialPrintPage';
+import { PurchaseOrderManager } from './components/PurchaseOrderManager';
+import { SettingsManager } from './components/SettingsManager';
 import { AITakahashi } from './components/AITakahashi';
+import { LinkUserManagement } from './components/LinkUserManagement';
 import { generateMaterialsFromFile } from './services/geminiService';
 import * as storage from './services/firebaseService';
 
@@ -23,6 +26,7 @@ const App: React.FC = () => {
   const [pricingRules, setPricingRules] = useState<PricingRule[]>([]);
   const [slips, setSlips] = useState<Slip[]>([]);
   const [estimates, setEstimates] = useState<Estimate[]>([]);
+  const [settings, setSettings] = useState<AppSettings | null>(null);
 
   const [activeCustomer, setActiveCustomer] = useState<string | null>(null);
   const [activeSite, setActiveSite] = useState<string | null>(null);
@@ -33,12 +37,15 @@ const App: React.FC = () => {
   const [isEstimateManagerOpen, setIsEstimateManagerOpen] = useState(false);
   const [isMasterViewOpen, setIsMasterViewOpen] = useState(false);
   const [isQuickSearchOpen, setIsQuickSearchOpen] = useState(false);
+  const [isPOManagerOpen, setIsPOManagerOpen] = useState(false);
+  const [isLinkUserManagementOpen, setIsLinkUserManagementOpen] = useState(false);
 
   // SlipManager制御用
   const [slipManagerOpen, setSlipManagerOpen] = useState(false);
   const [slipManagerInitialTab, setSlipManagerInitialTab] = useState<'create' | 'history'>('create');
   const [isEditingSlip, setIsEditingSlip] = useState(false);
   const [isPrintPageOpen, setIsPrintPageOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [printItems, setPrintItems] = useState<MaterialItem[]>([]);
 
   const [editingItem, setEditingItem] = useState<MaterialItem | null>(null);
@@ -49,6 +56,10 @@ const App: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set<string>());
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const pendingOutboundsCount = useMemo(() =>
+    slips.filter(s => s.type === 'outbound' && !s.isClosed).length,
+    [slips]);
 
   useEffect(() => {
     const unsubAuth = storage.subscribeToAuth(user => { setCurrentUser(user); setIsAuthLoading(false); });
@@ -62,9 +73,10 @@ const App: React.FC = () => {
     const unsubRules = storage.subscribeToPricingRules(setPricingRules);
     const unsubSlips = storage.subscribeToSlips(setSlips);
     const unsubEstimates = storage.subscribeToEstimates(setEstimates);
+    const unsubSettings = storage.subscribeToSettings(setSettings);
     setIsInitializing(false);
     return () => {
-      unsubItems(); unsubCustomers(); unsubRules(); unsubSlips(); unsubEstimates();
+      unsubItems(); unsubCustomers(); unsubRules(); unsubSlips(); unsubEstimates(); unsubSettings();
     };
   }, [currentUser, isAuthLoading]);
 
@@ -113,12 +125,33 @@ const App: React.FC = () => {
     } catch (e) { alert("一括更新中にエラーが発生しました。"); }
   };
 
-  const handleMasterAccess = () => {
+  const handleMasterAccess = async () => {
+    const correctPassword = settings?.adminPassword || '0000';
     const password = window.prompt('資材管理パスワードを入力してください:');
-    if (password === '6815') {
+
+    if (password === correctPassword) {
       setIsMasterViewOpen(true);
     } else if (password !== null) {
-      alert('パスワードが間違っています。');
+      if (settings?.securityQuestion && settings?.securityAnswer) {
+        const wantsReset = window.confirm('パスワードが違います。秘密の質問でパスワードを再設定しますか？');
+        if (wantsReset) {
+          const answer = window.prompt(`秘密の質問: ${settings.securityQuestion}`);
+          if (answer === settings.securityAnswer) {
+            const newPassword = window.prompt('新しいパスワードを設定してください:');
+            if (newPassword && newPassword.trim()) {
+              await storage.updateSettings(settings.id || 'new', {
+                ...settings,
+                adminPassword: newPassword.trim()
+              });
+              alert('パスワードを更新しました。新しいパスワードでログインしてください。');
+            }
+          } else if (answer !== null) {
+            alert('答えが間違っています。');
+          }
+        }
+      } else {
+        alert('パスワードが間違っています。');
+      }
     }
   };
 
@@ -152,11 +185,32 @@ const App: React.FC = () => {
       action: () => setIsQuickSearchOpen(true)
     },
     {
+      title: '発注・入荷管理',
+      desc: '仕入先への発注書作成と、入荷時の自動在庫更新を行います。',
+      icon: ShoppingCart,
+      color: 'bg-emerald-600',
+      action: () => setIsPOManagerOpen(true)
+    },
+    {
       title: '資材・単価管理',
       desc: 'マスター登録、AIインポート、顧客別単価を設定します。',
       icon: Database,
       color: 'bg-slate-900',
       action: handleMasterAccess
+    },
+    {
+      title: '環境設定・口座設定',
+      desc: '自社情報（名称、住所、T番号）および振込先口座の編集。これらは各種帳票に自動反映されます。',
+      icon: Settings2,
+      color: 'bg-slate-700',
+      action: () => setIsSettingsOpen(true)
+    },
+    {
+      title: 'LINKユーザー管理',
+      desc: 'COREXIA LINK (顧客用アプリ) の利用申請の承認・管理を行います。',
+      icon: UserCheck,
+      color: 'bg-rose-600',
+      action: () => setIsLinkUserManagementOpen(true)
     }
   ];
 
@@ -167,12 +221,13 @@ const App: React.FC = () => {
       {/* Header */}
       <header className="h-20 bg-white border-b flex items-center justify-between px-10 shrink-0 z-50 shadow-sm print:hidden">
         <div className="flex items-center gap-4">
-          <div className="w-10 h-10 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-100">
-            <Zap className="w-6 h-6 text-white" />
-          </div>
-          <div className="flex flex-col">
-            <h1 className="text-xl font-black text-slate-900 leading-none tracking-tight">資材販売プロAICLOUD版</h1>
-            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Material Center Pro</span>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center">
+              <img src="/logo.png" alt="COREXIA core" className="h-14 w-auto" />
+              <div className="ml-3 flex flex-col justify-center">
+                <h1 className="text-2xl font-black text-slate-800 tracking-tight leading-none">COREXIA <span className="text-blue-600">core</span></h1>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -184,6 +239,13 @@ const App: React.FC = () => {
               <span className="text-xs font-bold text-slate-600">Connected to Firebase</span>
             </div>
           </div>
+          <button onClick={() => setIsSettingsOpen(true)} className="p-3 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-2xl transition-all" title="環境設定">
+            <Settings2 size={22} />
+          </button>
+          <button onClick={() => setIsPOManagerOpen(true)} className="p-3 bg-slate-100 text-slate-600 rounded-2xl hover:bg-emerald-50 hover:text-emerald-600 transition-all group relative" title="発注・入荷管理">
+            <ShoppingCart size={22} />
+            <span className="absolute -bottom-8 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">発注・入荷管理</span>
+          </button>
           <button onClick={() => { setSlipManagerInitialTab('create'); setSlipManagerOpen(true); }} className={`relative p-3 rounded-2xl transition-all ${cart.length > 0 ? 'bg-blue-600 text-white shadow-xl' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
             <ClipboardList size={22} />
             {cart.length > 0 && <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[10px] font-black w-6 h-6 flex items-center justify-center rounded-full border-2 border-white">{cart.length}</span>}
@@ -196,10 +258,30 @@ const App: React.FC = () => {
         <div className="max-w-6xl mx-auto space-y-12">
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
             <div>
+              {pendingOutboundsCount > 0 && (
+                <div
+                  onClick={() => { setSlipManagerInitialTab('create'); setSlipManagerOpen(true); }}
+                  className="mb-8 bg-amber-50 border-2 border-amber-200 p-6 rounded-[2.5rem] flex items-center justify-between shadow-sm cursor-pointer hover:bg-amber-100 transition-all group animate-in slide-in-from-top-4 duration-500"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-14 h-14 bg-amber-500 text-white rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
+                      <AlertTriangle size={28} />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-black text-amber-900 tracking-tight">{pendingOutboundsCount}件の未対応入伝があります</h3>
+                      <p className="text-xs text-amber-700 font-bold opacity-80">出庫待ち伝票・LINKからの注文が届いています。内容を確認して出庫処理を完了させてください。</p>
+                    </div>
+                  </div>
+                  <div className="bg-amber-900/10 text-amber-900 px-6 py-3 rounded-2xl text-xs font-black flex items-center gap-2 group-hover:bg-amber-900/20 transition-colors">
+                    詳細を確認 <ArrowRight size={16} />
+                  </div>
+                </div>
+              )}
               <h2 className="text-4xl font-black text-slate-900 tracking-tighter">お疲れ様です。</h2>
               <p className="text-slate-500 font-bold mt-2">今日はどのアクションから開始しますか？</p>
             </div>
             <div className="flex gap-4">
+              <StatsCard title="在庫総額(原価)" value={`¥${items.reduce((s, i) => s + ((i.costPrice || 0) * (i.quantity || 0)), 0).toLocaleString()}`} icon={Database} color="rose" compact />
               <StatsCard title="資材総数" value={items.length.toLocaleString()} icon={Package} color="blue" compact />
               <StatsCard title="本日の伝票" value={slips.filter(s => s.date === new Date().toISOString().slice(0, 10)).length.toString()} icon={TrendingUp} color="emerald" compact />
             </div>
@@ -231,6 +313,14 @@ const App: React.FC = () => {
         <div className="print:hidden">
           <AITakahashi
             masterItems={items}
+            currentScreen={
+              isMasterViewOpen ? 'MASTER_MANAGEMENT' :
+                isEstimateManagerOpen ? 'ESTIMATE_MANAGER' :
+                  (slipManagerOpen && slipManagerInitialTab === 'create') ? 'SLIP_CREATE' :
+                    isQuickSearchOpen ? 'QUICK_SEARCH' :
+                      isPOManagerOpen ? 'PO_MANAGER' :
+                        isSettingsOpen ? 'SETTINGS' : 'TOP'
+            }
             helpMessage={isMasterViewOpen ? "アイテム追加や価格改定があったら僕に相談しな！" : (isEstimateManagerOpen ? "なんのせ見積手伝うかい？" : (slipManagerOpen && slipManagerInitialTab === 'create' ? "伝票を起こすの手伝うかい？" : undefined))}
             welcomeMessage={isMasterViewOpen ? "あ、高橋です。なんのせ僕に教えてくれたらやっとくよ？" : (isEstimateManagerOpen ? "あ、高橋です。なんのせFAXやメモの写真からでも見積を作れるから、僕に送ってみてな。もちろん相談しながら手入力で作るのも手伝うよ。" : (slipManagerOpen && slipManagerInitialTab === 'create' ? "なんのせお客さんのメモやFAXの写真からでも伝票起こしてあげるから任せな！" : undefined))}
             onAddToCart={newItems => {
@@ -243,6 +333,14 @@ const App: React.FC = () => {
               setSlipManagerOpen(true);
             }}
             onUpdateInfo={info => { if (info.customerName) setActiveCustomer(info.customerName); }}
+            onRegisterItems={async items => {
+              try {
+                await storage.importMaterials(items);
+                alert(`${items.length}件の資材をマスターに登録しました。`);
+              } catch (e) {
+                alert("登録に失敗しました。");
+              }
+            }}
             onCreateEstimate={async items => {
               const today = new Date();
               const valid = new Date(); valid.setDate(today.getDate() + 30);
@@ -274,6 +372,9 @@ const App: React.FC = () => {
                 <button onClick={() => setIsPricingManagerOpen(true)} className="flex items-center gap-2 bg-indigo-600 text-white p-3 md:px-6 md:py-3 rounded-2xl text-xs font-black shadow-lg hover:bg-indigo-700 transition-all active:scale-95">
                   <UserCheck size={18} /> <span className="hidden md:inline">顧客別単価</span>
                 </button>
+                <button onClick={() => setIsPOManagerOpen(true)} className="flex items-center gap-2 bg-emerald-600 text-white p-3 md:px-6 md:py-3 rounded-2xl text-xs font-black shadow-lg hover:bg-emerald-700 transition-all active:scale-95">
+                  <ShoppingCart size={18} /> <span className="hidden md:inline">発注・入荷管理</span>
+                </button>
                 <div className="h-8 w-px bg-slate-200 mx-1 md:mx-2"></div>
                 <button onClick={() => setIsMasterViewOpen(false)} className="p-3 bg-slate-100 hover:bg-slate-200 rounded-2xl transition-all"><X size={24} /></button>
               </div>
@@ -303,9 +404,8 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Hidden file input for AI upload, might still be used by AI Takahashi if integrated, otherwise keep it or remove if fully integrated in chat. The user said 'AI high bridge button function integrated so please delete'. The AI Takahashi component handles its own file input for chat. This one is for the button we just removed. */}
-      {/* However, handleAIUpload is defined above. If we remove the button, we don't trigger fileInputRef.current.click(). So we can remove this input too. but let's just comment it out or leave it if it's harmless. */}
-      <input type="file" ref={fileInputRef} onChange={handleAIUpload} className="hidden" accept=".xlsx,.xls,.csv,image/*" />
+      {/* Hidden file input for AI upload */}
+      <input type="file" ref={fileInputRef} onChange={handleAIUpload} className="hidden" accept=".xlsx,.xls,.csv,image/*,application/pdf" />
 
       {isFormOpen && <MaterialForm isOpen={isFormOpen} onClose={() => { setIsFormOpen(false); setEditingItem(null); }} onSave={async data => { if (editingItem) await storage.updateMaterial(editingItem.id, data); else await storage.addMaterial(data); setIsFormOpen(false); setEditingItem(null); }} initialData={editingItem} />}
       {isPricingManagerOpen && <PricingManager rules={pricingRules} customers={customers} items={items} onClose={() => setIsPricingManagerOpen(false)} />}
@@ -319,13 +419,40 @@ const App: React.FC = () => {
           customers={customers}
           pricingRules={pricingRules}
           masterItems={items}
+          settings={settings}
           onTabChange={(tab) => setSlipManagerInitialTab(tab)}
           onEditModeChange={setIsEditingSlip}
         />
       )}
-      {isEstimateManagerOpen && <EstimateManager masterItems={items} onClose={() => setIsEstimateManagerOpen(false)} onConvertToSlip={(items, cust, site) => {
-        setCart(items); setActiveCustomer(cust); if (site) setActiveSite(site); setSlipManagerInitialTab('create'); setSlipManagerOpen(true);
-      }} />}
+      {isEstimateManagerOpen && (
+        <EstimateManager
+          masterItems={items}
+          settings={settings}
+          customers={customers}
+          onClose={() => setIsEstimateManagerOpen(false)}
+          onConvertToSlip={(items, cust, site) => {
+            setCart(items);
+            setActiveCustomer(cust);
+            if (site) setActiveSite(site);
+            setSlipManagerInitialTab('create');
+            setSlipManagerOpen(true);
+          }}
+        />
+      )}
+      {isPOManagerOpen && (
+        <PurchaseOrderManager
+          masterItems={items}
+          settings={settings}
+          onClose={() => setIsPOManagerOpen(false)}
+        />
+      )}
+
+      {isSettingsOpen && (
+        <SettingsManager
+          settings={settings}
+          onClose={() => setIsSettingsOpen(false)}
+        />
+      )}
 
       {isQuickSearchOpen && (
         <MaterialQuickSearch
@@ -336,6 +463,20 @@ const App: React.FC = () => {
           activeSite={activeSite}
           onClose={() => setIsQuickSearchOpen(false)}
         />
+      )}
+
+      {isLinkUserManagementOpen && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 lg:p-8 animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden relative border border-white/20">
+            <button
+              onClick={() => setIsLinkUserManagementOpen(false)}
+              className="absolute top-6 right-6 p-2 bg-slate-100 hover:bg-slate-200 rounded-full transition-colors z-50 text-slate-500 hover:text-slate-800"
+            >
+              <X size={20} />
+            </button>
+            <LinkUserManagement />
+          </div>
+        </div>
       )}
 
       {isPrintPageOpen && (

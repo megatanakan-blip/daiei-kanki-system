@@ -6,23 +6,27 @@ import {
   updateDoc,
   deleteDoc,
   doc,
+  getDoc,
   query,
   orderBy,
   where,
   getDocs,
   writeBatch,
+  increment,
   Unsubscribe
 } from 'firebase/firestore';
 import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { db, auth, googleProvider } from '../firebaseConfig';
-import { Material, Customer, PricingRule, Slip, Estimate } from '../types';
+import { Material, Customer, PricingRule, Slip, Estimate, PurchaseOrder, AppSettings } from '../types';
 
 const COLLECTIONS = {
   MATERIALS: 'materials',
   CUSTOMERS: 'customers',
   RULES: 'pricingRules',
   SLIPS: 'slips',
-  ESTIMATES: 'estimates'
+  ESTIMATES: 'estimates',
+  PURCHASE_ORDERS: 'purchaseOrders',
+  SETTINGS: 'settings'
 };
 
 export const subscribeToAuth = (callback: (user: User | null) => void) => {
@@ -48,6 +52,18 @@ export const subscribeToCustomers = (cb: (c: Customer[]) => void): Unsubscribe =
 export const subscribeToPricingRules = (cb: (r: PricingRule[]) => void): Unsubscribe => subscribe<PricingRule>(COLLECTIONS.RULES, cb);
 export const subscribeToSlips = (cb: (s: Slip[]) => void): Unsubscribe => subscribe<Slip>(COLLECTIONS.SLIPS, cb);
 export const subscribeToEstimates = (cb: (e: Estimate[]) => void): Unsubscribe => subscribe<Estimate>(COLLECTIONS.ESTIMATES, cb);
+export const subscribeToPurchaseOrders = (cb: (po: PurchaseOrder[]) => void): Unsubscribe => subscribe<PurchaseOrder>(COLLECTIONS.PURCHASE_ORDERS, cb);
+export const subscribeToSettings = (cb: (s: AppSettings | null) => void): Unsubscribe => {
+  const q = query(collection(db, COLLECTIONS.SETTINGS));
+  return onSnapshot(q, (snapshot) => {
+    if (snapshot.empty) {
+      cb(null);
+    } else {
+      const doc = snapshot.docs[0];
+      cb({ id: doc.id, ...doc.data() } as any);
+    }
+  });
+};
 
 export const addMaterial = async (m: Omit<Material, 'id' | 'updatedAt'>) => {
   const { ...data } = m;
@@ -120,29 +136,59 @@ export const importMaterials = async (items: Partial<Material>[]) => {
   await batch.commit();
 };
 
-export const addCustomer = (c: Omit<Customer, 'id'>) => addDoc(collection(db, COLLECTIONS.CUSTOMERS), { ...c, updatedAt: Date.now() });
+export const addCustomer = async (c: Omit<Customer, 'id'>) => {
+  const docRef = await addDoc(collection(db, COLLECTIONS.CUSTOMERS), { ...c, updatedAt: Date.now() });
+  return docRef.id;
+};
+export const updateCustomer = async (id: string, c: Partial<Customer>) => {
+  const docRef = doc(db, COLLECTIONS.CUSTOMERS, id);
+  await updateDoc(docRef, { ...c, updatedAt: Date.now() });
+};
 export const deleteCustomer = (id: string) => deleteDoc(doc(db, COLLECTIONS.CUSTOMERS, id));
 
-export const addPricingRule = (r: Omit<PricingRule, 'id'>) => addDoc(collection(db, COLLECTIONS.RULES), { ...r, updatedAt: Date.now() });
+export const addPricingRule = async (r: Omit<PricingRule, 'id'>) => {
+  const docRef = await addDoc(collection(db, COLLECTIONS.RULES), { ...r, updatedAt: Date.now() });
+  return docRef.id;
+};
 export const deletePricingRule = (id: string) => deleteDoc(doc(db, COLLECTIONS.RULES, id));
 
-export const addSlip = (s: Omit<Slip, 'id'>) => addDoc(collection(db, COLLECTIONS.SLIPS), { ...s, updatedAt: Date.now() });
+export const addSlip = async (s: Omit<Slip, 'id'>) => {
+  const docRef = await addDoc(collection(db, COLLECTIONS.SLIPS), { ...s, updatedAt: Date.now() });
+  return docRef.id;
+};
 export const updateSlip = async (id: string, data: Partial<Slip>) => {
   const docRef = doc(db, COLLECTIONS.SLIPS, id);
   await updateDoc(docRef, { ...data, updatedAt: Date.now() });
 };
 export const deleteSlip = (id: string) => deleteDoc(doc(db, COLLECTIONS.SLIPS, id));
 
-const sanitizeData = (obj: any) => {
+const removeUndefined = (obj: any): any => {
+  if (Array.isArray(obj)) {
+    return obj.map(item => removeUndefined(item));
+  }
+  if (typeof obj === 'object' && obj !== null) {
+    const cleaned: any = {};
+    Object.keys(obj).forEach(key => {
+      const value = obj[key];
+      if (value !== undefined) {
+        cleaned[key] = removeUndefined(value);
+      }
+    });
+    return cleaned;
+  }
+  return obj;
+};
+
+const sanitizeData = (obj: any, isRoot = true) => {
   const sanitized: any = {};
   Object.keys(obj).forEach(key => {
-    if (key === 'id') return; // Strip ID
+    if (key === 'id' && isRoot) return; // Only strip ID at the root level
     const value = obj[key];
     if (value === undefined) return;
     if (Array.isArray(value)) {
-      sanitized[key] = value.map(item => (typeof item === 'object' && item !== null) ? sanitizeData(item) : item);
+      sanitized[key] = value.map(item => (typeof item === 'object' && item !== null) ? sanitizeData(item, false) : item);
     } else if (typeof value === 'object' && value !== null) {
-      sanitized[key] = sanitizeData(value);
+      sanitized[key] = sanitizeData(value, false);
     } else {
       sanitized[key] = value;
     }
@@ -150,14 +196,66 @@ const sanitizeData = (obj: any) => {
   return sanitized;
 };
 
-export const addEstimate = (e: Omit<Estimate, 'id'>) => {
+export const addEstimate = async (e: Omit<Estimate, 'id'>) => {
   const data = sanitizeData(e);
-  return addDoc(collection(db, COLLECTIONS.ESTIMATES), { ...data, updatedAt: Date.now() });
+  const docRef = await addDoc(collection(db, COLLECTIONS.ESTIMATES), { ...data, updatedAt: Date.now() });
+  return docRef.id;
 };
 
 export const updateEstimate = async (id: string, e: Partial<Estimate>) => {
-  const data = sanitizeData(e);
+  const { id: _, ...rest } = e as any;
+  const data = removeUndefined(rest);
   const docRef = doc(db, COLLECTIONS.ESTIMATES, id);
   await updateDoc(docRef, { ...data, updatedAt: Date.now() });
 };
 export const deleteEstimate = (id: string) => deleteDoc(doc(db, COLLECTIONS.ESTIMATES, id));
+
+export const addPurchaseOrder = async (po: Omit<PurchaseOrder, 'id'>) => {
+  const data = sanitizeData(po);
+  const docRef = await addDoc(collection(db, COLLECTIONS.PURCHASE_ORDERS), { ...data, updatedAt: Date.now() });
+  return docRef.id;
+};
+
+export const updatePurchaseOrder = async (id: string, po: Partial<PurchaseOrder>) => {
+  const { id: _, ...rest } = po as any;
+  const data = removeUndefined(rest);
+  const docRef = doc(db, COLLECTIONS.PURCHASE_ORDERS, id);
+  await updateDoc(docRef, { ...data, updatedAt: Date.now() });
+};
+
+export const deletePurchaseOrder = (id: string) => deleteDoc(doc(db, COLLECTIONS.PURCHASE_ORDERS, id));
+
+export const updateSettings = async (id: string, s: Partial<AppSettings>) => {
+  const { id: _, ...rest } = s as any;
+  const data = removeUndefined(rest);
+  if (id === 'new') {
+    return addDoc(collection(db, COLLECTIONS.SETTINGS), { ...data, updatedAt: Date.now() });
+  }
+  const docRef = doc(db, COLLECTIONS.SETTINGS, id);
+  await updateDoc(docRef, { ...data, updatedAt: Date.now() });
+};
+
+export const updateMaterialQuantity = async (id: string, delta: number) => {
+  const docRef = doc(db, COLLECTIONS.MATERIALS, id);
+  await updateDoc(docRef, {
+    quantity: increment(delta),
+    updatedAt: Date.now()
+  });
+};
+
+export const receivePurchaseOrderItems = async (items: { id: string, quantity: number }[]) => {
+  const batch = writeBatch(db);
+  items.forEach(item => {
+    const ref = doc(db, COLLECTIONS.MATERIALS, item.id);
+    batch.update(ref, {
+      quantity: increment(item.quantity),
+      updatedAt: Date.now()
+    });
+  });
+  await batch.commit();
+};
+
+export const markSlipAsHandled = async (id: string) => {
+  const docRef = doc(db, COLLECTIONS.SLIPS, id);
+  await updateDoc(docRef, { isHandled: true, updatedAt: Date.now() });
+};

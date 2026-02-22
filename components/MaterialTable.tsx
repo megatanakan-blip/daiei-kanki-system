@@ -18,7 +18,9 @@ import {
   CheckSquare,
   Square,
   Trash2,
-  Printer
+  Printer,
+  Database,
+  Landmark
 } from 'lucide-react';
 
 interface MaterialTableProps {
@@ -62,6 +64,7 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
   onPrint
 }) => {
   const [filters, setFilters] = React.useState({ category: '', name: '', manufacturer: '', model: '', location: '' });
+  const [showRevisedOnly, setShowRevisedOnly] = React.useState(false); // 価格改定ありのみ表示
   const [calcRate, setCalcRate] = React.useState<string>('');
   const [calcType, setCalcType] = React.useState<'list_rate' | 'cost_markup' | 'cost_rate'>('list_rate');
   const [isProcessing, setIsProcessing] = React.useState(false);
@@ -134,7 +137,8 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
       (!filters.name || item.name.toLowerCase().includes(filters.name.toLowerCase())) &&
       (!filters.manufacturer || (item.manufacturer || '').toLowerCase().includes(filters.manufacturer.toLowerCase())) &&
       (!filters.model || `${item.model || ''} ${item.dimensions || ''} `.toLowerCase().includes(filters.model.toLowerCase())) &&
-      (!filters.location || (item.location || '').toLowerCase().includes(filters.location.toLowerCase()))
+      (!filters.location || (item.location || '').toLowerCase().includes(filters.location.toLowerCase())) &&
+      (!showRevisedOnly || (item.previousListPrice && item.previousListPrice !== item.listPrice) || (item.previousCostPrice && item.previousCostPrice !== item.costPrice))
     );
   });
 
@@ -162,10 +166,25 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
   const allVisibleIds = filteredItems.map(i => i.id);
   const isAllSelected = filteredItems.length > 0 && allVisibleIds.every(id => selectedIds.has(id));
 
+  const totalFilteredValue = filteredItems.reduce((s, i) => s + ((i.costPrice || 0) * (i.quantity || 0)), 0);
+
   return (
     <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-full">
       {/* Table Controls */}
-      <div className="p-2 sm:p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-4">
+      <div className="p-2 sm:p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-4 flex-wrap">
+        <div className="hidden lg:flex items-center gap-2 bg-emerald-50 px-4 py-2.5 rounded-xl border border-emerald-200 shadow-sm animate-fade-in">
+          <Landmark size={14} className="text-emerald-600 shrink-0" />
+          <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mr-2 shrink-0">表示中在庫総額:</span>
+          <span className="text-sm font-black text-emerald-700 font-mono">¥{filteredItems.reduce((acc, item) => acc + ((item.costPrice || 0) * (item.quantity || 0)), 0).toLocaleString()}</span>
+        </div>
+
+        <button
+          onClick={() => setShowRevisedOnly(!showRevisedOnly)}
+          className={`px-3 py-2 rounded-xl text-xs font-black transition-all border ${showRevisedOnly ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-white text-slate-400 border-slate-200 hover:text-slate-600'}`}
+        >
+          {showRevisedOnly ? '★ 価格改定ありを表示中' : '☆ 改定履歴を表示'}
+        </button>
+
         <div className="flex items-center gap-2 bg-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl border border-slate-200 shadow-sm min-w-0">
           <User size={12} className="text-slate-400 shrink-0 sm:hidden" />
           <User size={14} className="text-slate-400 shrink-0 hidden sm:block" />
@@ -331,9 +350,19 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
                       <span className="text-[10px] sm:text-xs font-mono font-bold text-slate-600">
                         {item.listPrice > 0 ? `定¥${Math.floor(item.listPrice).toLocaleString()}` : 'OPEN'}
                       </span>
+                      {item.previousListPrice && item.previousListPrice !== item.listPrice && (
+                        <span className="text-[9px] sm:text-[10px] font-mono font-bold text-slate-400 line-through decoration-slate-300">
+                          定¥{Math.floor(item.previousListPrice).toLocaleString()}
+                        </span>
+                      )}
                       <span className="text-[9px] sm:text-[10px] font-mono font-bold text-slate-400">
                         (仕¥{(item.costPrice || 0).toLocaleString()})
                       </span>
+                      {item.previousCostPrice && item.previousCostPrice !== item.costPrice && (
+                        <span className="text-[9px] sm:text-[10px] font-mono font-bold text-slate-400 line-through decoration-slate-300">
+                          (仕¥{Math.floor(item.previousCostPrice).toLocaleString()})
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td className="p-4 text-right">

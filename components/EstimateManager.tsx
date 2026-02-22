@@ -1,17 +1,23 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import ReactDOM from 'react-dom';
-import { Estimate, EstimateStatus, Customer, MaterialItem, SlipItem } from '../types';
-import { X, Printer, Search, FileText, Trash2, CheckCircle2, XCircle, Clock, ChevronRight, Loader2, Calendar, User, MapPin, Edit3, Plus, Minus, Save, RotateCcw, Camera, Sparkles, ShoppingCart } from 'lucide-react';
+import { Estimate, EstimateStatus, Customer, MaterialItem, SlipItem, AppSettings } from '../types';
+import { X, Printer, Search, FileText, Trash2, CheckCircle2, XCircle, Clock, ChevronRight, Loader2, Calendar, User, MapPin, Edit3, Plus, Minus, Save, RotateCcw, Camera, Sparkles, ShoppingCart, Mail } from 'lucide-react';
 import * as storage from '../services/firebaseService';
 import { parseOrderMemo } from '../services/geminiService';
 
-const COMPANY_INFO = {
-  name: "大栄管機株式会社",
-  zipCode: "〒080-0048",
+const DEFAULT_COMPANY_INFO: AppSettings = {
+  companyName: "大栄管機株式会社",
+  postalCode: "〒080-0048",
   address: "北海道帯広市西18条北1丁目1-14",
   phone: "0155-35-6815",
   fax: "0155-36-2661",
+  email: "daieikanki@f1.octv.ne.jp",
+  invoiceNumber: "T8460101000829",
+  categories: [],
+  banks: [
+    { bankName: "帯広信用金庫", branchName: "西支店", accountType: "当座", accountNumber: "005322", accountHolder: "大栄管機(株)" },
+  ]
 };
 
 const generateId = () => Math.random().toString(36).substring(2) + Date.now().toString(36);
@@ -20,17 +26,21 @@ interface EstimateManagerProps {
   onClose: () => void;
   onConvertToSlip?: (items: SlipItem[], customer: string, site?: string) => void;
   masterItems: MaterialItem[];
+  settings: AppSettings | null;
+  customers: Customer[];
 }
 
 // Cover Page Component (Page 1)
-const EstimateCoverPage = ({ estimate, isEditing, onUpdateMeta, pageTotals }: {
+const EstimateCoverPage = ({ estimate, isEditing, onUpdateMeta, pageTotals, settings }: {
   estimate: Estimate,
   isEditing: boolean,
   onUpdateMeta: (data: Partial<Estimate>) => void,
-  pageTotals: { page: number; total: number }[]
+  pageTotals: { page: number; total: number }[],
+  settings: AppSettings | null
 }) => {
+  const info = settings || DEFAULT_COMPANY_INFO;
   return (
-    <div className="bg-white p-10 text-slate-900 flex flex-col justify-between h-full w-full box-border min-h-[280mm] print:p-0 print:min-h-0 print:h-auto">
+    <div className="bg-white p-10 print:p-[15mm] text-slate-900 flex flex-col justify-between h-full w-full box-border min-h-[280mm]">
       <div className="w-full">
         <div className="flex justify-between items-end border-b-4 border-slate-900 pb-2 mb-6 print:mb-2 print:pb-1">
           <h1 className="text-3xl font-serif font-bold tracking-[0.5em]">御見積書</h1>
@@ -76,9 +86,9 @@ const EstimateCoverPage = ({ estimate, isEditing, onUpdateMeta, pageTotals }: {
           </div>
           <div className="w-[40%] text-right text-[10px] flex flex-col items-end gap-3">
             <div className="text-right leading-relaxed">
-              <h3 className="text-sm font-bold mb-1">{COMPANY_INFO.name}</h3>
-              <p>{COMPANY_INFO.zipCode} {COMPANY_INFO.address}</p>
-              <p className="mt-1 font-bold">TEL: {COMPANY_INFO.phone}</p>
+              <h3 className="text-sm font-bold mb-1">{info.companyName}</h3>
+              <p>{info.postalCode} {info.address}</p>
+              <p className="mt-1 font-bold">TEL: {info.phone}</p>
               <div className="flex justify-end gap-1 mt-1 font-bold">
                 <span>担当:</span>
                 {isEditing ? (
@@ -134,14 +144,16 @@ const EstimateCoverPage = ({ estimate, isEditing, onUpdateMeta, pageTotals }: {
 };
 
 // Detail Page Component (Page 2+) - Item table only
-const EstimateDetailPage = ({ estimate, pageNumber, isEditing, onUpdateItem, onDeleteItem, masterItems }: {
+const EstimateDetailPage = ({ estimate, pageNumber, isEditing, onUpdateItem, onDeleteItem, masterItems, settings }: {
   estimate: Estimate,
   pageNumber: number,
   isEditing: boolean,
   onUpdateItem: (idx: number, data: Partial<SlipItem>) => void,
   onDeleteItem: (idx: number) => void,
-  masterItems: MaterialItem[]
+  masterItems: MaterialItem[],
+  settings: AppSettings | null
 }) => {
+  const info = settings || DEFAULT_COMPANY_INFO;
   const [suggestionIdx, setSuggestionIdx] = useState<number | null>(null);
   const [suggestionType, setSuggestionType] = useState<'name' | 'model' | null>(null);
   const [query, setQuery] = useState('');
@@ -173,7 +185,7 @@ const EstimateDetailPage = ({ estimate, pageNumber, isEditing, onUpdateItem, onD
   };
 
   return (
-    <div className="bg-white p-10 text-slate-900 flex flex-col justify-between h-full w-full box-border min-h-[280mm] print:p-0 print:min-h-0 print:h-auto">
+    <div className="bg-white p-10 print:p-[15mm] text-slate-900 flex flex-col justify-between h-full w-full box-border min-h-[280mm]">
       <div className="w-full">
         {/* Simplified header for detail pages */}
         <div className="flex justify-between items-center border-b-2 border-slate-300 pb-1 mb-3 print:mb-2">
@@ -317,7 +329,7 @@ const EstimateDetailPage = ({ estimate, pageNumber, isEditing, onUpdateItem, onD
   );
 };
 
-const EstimatePage = ({ estimate, isEditing, onUpdateItem, onDeleteItem, onUpdateMeta, masterItems, pageNumber = 1, cumulativeTotal = 0, isCoverPage = false, pageTotals = [] }: {
+const EstimatePage = ({ estimate, isEditing, onUpdateItem, onDeleteItem, onUpdateMeta, masterItems, pageNumber = 1, cumulativeTotal = 0, isCoverPage = false, pageTotals = [], settings }: {
   estimate: Estimate,
   isEditing: boolean,
   onUpdateItem: (idx: number, data: Partial<SlipItem>) => void,
@@ -327,8 +339,10 @@ const EstimatePage = ({ estimate, isEditing, onUpdateItem, onDeleteItem, onUpdat
   pageNumber?: number,
   cumulativeTotal?: number,
   isCoverPage?: boolean,
-  pageTotals?: { page: number; total: number }[]
+  pageTotals?: { page: number; total: number }[],
+  settings: AppSettings | null
 }) => {
+  const info = settings || DEFAULT_COMPANY_INFO;
   const [suggestionIdx, setSuggestionIdx] = useState<number | null>(null);
   const [suggestionType, setSuggestionType] = useState<'name' | 'model' | null>(null);
   const [query, setQuery] = useState('');
@@ -408,9 +422,9 @@ const EstimatePage = ({ estimate, isEditing, onUpdateItem, onDeleteItem, onUpdat
             </div>
             <div className="w-[40%] text-right text-[10px] flex flex-col items-end gap-3">
               <div className="text-right leading-relaxed">
-                <h3 className="text-sm font-bold mb-1">{COMPANY_INFO.name}</h3>
-                <p>{COMPANY_INFO.zipCode} {COMPANY_INFO.address}</p>
-                <p className="mt-1 font-bold">TEL: {COMPANY_INFO.phone}</p>
+                <h3 className="text-sm font-bold mb-1">{info.companyName}</h3>
+                <p>{info.postalCode} {info.address}</p>
+                <p className="mt-1 font-bold">TEL: {info.phone}</p>
                 <div className="flex justify-end gap-1 mt-1 font-bold">
                   <span>担当:</span>
                   {isEditing ? (
@@ -520,9 +534,9 @@ const EstimatePage = ({ estimate, isEditing, onUpdateItem, onDeleteItem, onUpdat
           </div>
           <div className="w-[40%] text-right text-[10px] flex flex-col items-end gap-3">
             <div className="text-right leading-relaxed">
-              <h3 className="text-sm font-bold mb-1">{COMPANY_INFO.name}</h3>
-              <p>{COMPANY_INFO.zipCode} {COMPANY_INFO.address}</p>
-              <p className="mt-1 font-bold">TEL: {COMPANY_INFO.phone}</p>
+              <h3 className="text-sm font-bold mb-1">{info.companyName}</h3>
+              <p>{info.postalCode} {info.address}</p>
+              <p className="mt-1 font-bold">TEL: {info.phone}</p>
               <div className="flex justify-end gap-1 mt-1 font-bold">
                 <span>担当:</span>
                 {isEditing ? (
@@ -743,7 +757,7 @@ const EstimatePage = ({ estimate, isEditing, onUpdateItem, onDeleteItem, onUpdat
   );
 };
 
-export const EstimateManager: React.FC<EstimateManagerProps> = ({ onClose, onConvertToSlip, masterItems }) => {
+export const EstimateManager: React.FC<EstimateManagerProps> = ({ onClose, onConvertToSlip, masterItems, settings, customers }) => {
   const [estimates, setEstimates] = useState<Estimate[]>([]);
   const [selectedEstimate, setSelectedEstimate] = useState<Estimate | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -835,8 +849,8 @@ export const EstimateManager: React.FC<EstimateManagerProps> = ({ onClose, onCon
       slipNumber: `EST-${generateId().slice(0, 6).toUpperCase()}`
     };
     try {
-      const docRef = await storage.addEstimate(newEst);
-      const saved = { ...newEst, id: docRef.id } as Estimate;
+      const id = await storage.addEstimate(newEst);
+      const saved = { ...newEst, id } as Estimate;
       setSelectedEstimate(saved);
       setIsEditing(true);
     } catch (e) {
@@ -894,6 +908,32 @@ export const EstimateManager: React.FC<EstimateManagerProps> = ({ onClose, onCon
           </div>
         </div>
 
+        <style dangerouslySetInnerHTML={{
+          __html: `
+            @media print {
+              @page { margin: 0; size: A4; }
+              * { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+              body { background: white !important; margin: 0 !important; padding: 0 !important; }
+              .no-print { display: none !important; }
+              .estimate-print-page { 
+                transform: none !important; 
+                box-shadow: none !important; 
+                page-break-after: always;
+                width: 210mm !important;
+                min-height: 297mm !important;
+              }
+              /* Override conflicting #print-target style */
+              #print-target > div,
+              .estimate-print-page > div,
+              .estimate-print-page > * {
+                padding: 15mm !important;
+                width: 100% !important;
+                box-sizing: border-box !important;
+              }
+            }
+          `
+        }} />
+
         <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
           <div className="w-full md:w-1/3 border-b md:border-b-0 md:border-r bg-slate-50 flex flex-col no-print max-h-[40vh] md:max-h-none">
             <div className="p-2 sm:p-4 border-b bg-white space-y-2 sm:space-y-3">
@@ -935,6 +975,22 @@ export const EstimateManager: React.FC<EstimateManagerProps> = ({ onClose, onCon
                       <span className="text-[10px] sm:text-xs font-mono font-bold text-slate-600 w-8 sm:w-12 text-center">{Math.round(previewScale * 100)}%</span>
                       <button onClick={() => setPreviewScale(s => Math.min(3.0, s + 0.1))} className="p-0.5 sm:p-1 hover:bg-slate-200 rounded text-slate-600 transition-colors"><Plus size={14} className="sm:hidden" /><Plus size={16} className="hidden sm:block" /></button>
                     </div>
+                    <button
+                      onClick={() => {
+                        const info = settings || DEFAULT_COMPANY_INFO;
+                        const customer = customers.find(c => c.name === selectedEstimate.customerName);
+                        const email = customer?.email || "";
+                        const subject = `【${info.companyName}】御見積書のご案内 (#${selectedEstimate.slipNumber})`;
+                        const body = `${selectedEstimate.customerName} 様\n\n平素より大変お世話になっております。${info.companyName}でございます。\n${selectedEstimate.constructionName || "一般"} 現場の御見積書が完成いたしました。\n\n詳細につきましては、本メールまたはシステム画面よりご確認ください。\n\n--------------------------------------------------\n見積番号: ${selectedEstimate.slipNumber}\n見積日: ${selectedEstimate.date}\n有効期限: ${selectedEstimate.validUntil}\n合計金額 (税込): ¥${(selectedEstimate.grandTotal || 0).toLocaleString()}\n--------------------------------------------------\n\nご確認のほど何卒よろしくお願い申し上げます。\n\n${info.companyName}\n${info.address}\nTEL: ${info.phone}\n${info.email}`;
+                        window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+                      }}
+                      className="bg-slate-100 text-slate-900 border border-slate-200 px-3 sm:px-6 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-black flex items-center gap-1 sm:gap-2 hover:bg-slate-200 transition-all shadow-sm"
+                      title="メールで送信"
+                    >
+                      <Mail size={14} className="sm:hidden" />
+                      <Mail size={18} className="hidden sm:block" />
+                      <span className="hidden sm:inline">メール</span>
+                    </button>
                     <button onClick={() => window.print()} className="bg-slate-100 text-slate-900 border border-slate-200 px-3 sm:px-6 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-black flex items-center gap-1 sm:gap-2 hover:bg-slate-200 transition-all shadow-sm"><Printer size={14} className="sm:hidden" /><Printer size={18} className="hidden sm:block" /> <span className="hidden sm:inline">印刷</span></button>
                     <button onClick={async () => window.confirm('見積データを削除しますか？') && storage.deleteEstimate(selectedEstimate.id)} className="p-2 sm:p-2.5 text-rose-500 hover:bg-rose-50 rounded-lg sm:rounded-xl transition-all"><Trash2 size={16} className="sm:hidden" /><Trash2 size={20} className="hidden sm:block" /></button>
                   </div>
@@ -959,6 +1015,7 @@ export const EstimateManager: React.FC<EstimateManagerProps> = ({ onClose, onCon
                         const startIdx = detailPageIdx * 16;
                         const pageItems = pageIdx === 0 ? [] : allItems.slice(startIdx, startIdx + 16);
                         const paddedItems = [...Array(16)].map((_, i) => pageItems[i] || { name: '', model: '', dimensions: '', quantity: 0, unit: '個', listPrice: 0, appliedPrice: 0, manufacturer: '' });
+                        const info = settings || DEFAULT_COMPANY_INFO;
 
 
                         return (
@@ -979,6 +1036,7 @@ export const EstimateManager: React.FC<EstimateManagerProps> = ({ onClose, onCon
                                 isEditing={isEditing}
                                 onUpdateMeta={handleUpdateMeta}
                                 pageTotals={pageTotals}
+                                settings={settings}
                               />
                             ) : (
                               <EstimateDetailPage
@@ -988,6 +1046,7 @@ export const EstimateManager: React.FC<EstimateManagerProps> = ({ onClose, onCon
                                 onUpdateItem={(idx, data) => handleUpdateItem(startIdx + idx, data)}
                                 onDeleteItem={(i) => handleUpdateItem(startIdx + i, { name: '', quantity: 0, appliedPrice: 0, listPrice: 0, model: '', dimensions: '', manufacturer: '' })}
                                 masterItems={masterItems}
+                                settings={settings}
                               />
                             )}
                           </div>

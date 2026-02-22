@@ -1,4 +1,28 @@
 
+export interface BankInfo {
+  bankName: string;
+  branchName: string;
+  accountType: '普通' | '当座';
+  accountNumber: string;
+  accountHolder: string;
+}
+
+export interface AppSettings {
+  companyName: string;
+  postalCode?: string;
+  address?: string;
+  phone?: string;
+  fax?: string;
+  email?: string;
+  invoiceNumber?: string;
+  categories: string[];
+  adminPassword?: string;
+  securityQuestion?: string;
+  securityAnswer?: string;
+  sealImage?: string;
+  banks?: BankInfo[];
+}
+
 export const MATERIAL_CATEGORIES = [
   "鋼管類", "銅管類", "ステンレス管類", "塩ビ管類", "CD・PF管類", "ダクト類", "ポリパイプ", "ボイド管", "ワンダーチューブ", "その他管",
   "鋼管継手", "銅管継手", "ステンレス継手", "排水継手", "樹脂管継手", "その他継手",
@@ -22,7 +46,10 @@ export interface Material {
   notes?: string;
   listPrice: number;
   sellingPrice: number;
-  costPrice: number;
+  costPrice: number; // 仕入値
+  previousListPrice?: number; // 旧定価
+  previousCostPrice?: number; // 旧仕入値
+  priceUpdatedDate?: string; // 価格改定日
   sourceUrl?: string;
   updatedAt: number;
 }
@@ -41,6 +68,7 @@ export interface Customer {
   id: string;
   name: string;
   closingDay?: number;
+  email?: string;
 }
 
 export interface PricingRule {
@@ -87,6 +115,8 @@ export interface Slip {
   orderingPerson?: string;
   receivingPerson?: string;
   issuerPerson?: string;
+  isHandled?: boolean;
+  source?: 'link' | 'core';
 }
 
 export type EstimateStatus = 'pending' | 'accepted' | 'rejected' | 'converted';
@@ -94,4 +124,31 @@ export type EstimateStatus = 'pending' | 'accepted' | 'rejected' | 'converted';
 export interface Estimate extends Omit<Slip, 'type' | 'isClosed'> {
   status: EstimateStatus;
   validUntil: string;
+}
+
+export type POStatus = 'draft' | 'ordered' | 'received' | 'cancelled';
+
+export interface PurchaseOrderItem extends SlipItem {
+}
+
+export interface PurchaseOrder extends Omit<Slip, 'type' | 'isClosed'> {
+  supplierName: string;
+  orderDate: string;
+  status: POStatus;
+  expectedDeliveryDate?: string;
+  items: PurchaseOrderItem[];
+}
+
+export type LinkUserRole = 'lite' | 'pro' | 'pending';
+
+export interface LinkUserProfile {
+  uid: string;
+  email: string;
+  displayName: string;
+  companyName: string;
+  phoneNumber: string;
+  role: LinkUserRole;
+  isApproved: boolean;
+  createdAt: string;
+  updatedAt: string;
 }

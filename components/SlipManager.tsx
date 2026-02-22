@@ -2,23 +2,22 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { Slip, SlipItem, SlipType, DeliveryTime, DeliveryDestination, MaterialItem, PricingRule, Customer } from '../types';
-import { X, Trash2, Printer, FileText, ShoppingCart, Save, HardHat, Loader2, Edit3, FileOutput, CheckSquare, Square, Search, MapPin, Clock, Users, Info, RotateCcw, AlertTriangle, ArrowRight, Package, Layers, Check, Calculator, History, Archive, FileStack, ChevronDown, ChevronRight, Building2, Eye, EyeOff, Calendar, User, UserCheck, Camera, Sparkles, Plus, Minus, MessageSquare, Edit2, LayoutGrid, FileSearch } from 'lucide-react';
+import { X, Trash2, Printer, FileText, ShoppingCart, Save, HardHat, Loader2, Edit3, FileOutput, CheckSquare, Square, Search, MapPin, Clock, Users, Info, RotateCcw, AlertTriangle, ArrowRight, Package, Layers, Check, Calculator, History, Archive, FileStack, ChevronDown, ChevronRight, Building2, Eye, EyeOff, Calendar, User, UserCheck, Camera, Sparkles, Plus, Minus, MessageSquare, Edit2, LayoutGrid, FileSearch, Database, Mail } from 'lucide-react';
 import * as storage from '../services/firebaseService';
 
+import { AppSettings } from '../types';
 
-const COMPANY_INFO = {
-    name: "大栄管機株式会社",
-    zipCode: "〒080-0048",
+const DEFAULT_COMPANY_INFO: AppSettings = {
+    companyName: "大栄管機株式会社",
+    postalCode: "〒080-0048",
     address: "北海道帯広市西18条北1丁目1-14",
     phone: "0155-35-6815",
     fax: "0155-36-2661",
     email: "daieikanki@f1.octv.ne.jp",
     invoiceNumber: "T8460101000829",
+    categories: [],
     banks: [
-        { name: "帯広信用金庫 西支店", type: "当座", number: "005322" },
-        { name: "北海道銀行 帯広支店", type: "当座", number: "0103503" },
-        { name: "北洋銀行 帯広中央支店", type: "当座", number: "530018" },
-        { name: "北見信用金庫 帯広支店", type: "当座", number: "0016460" },
+        { bankName: "帯広信用金庫", branchName: "西支店", accountType: "当座", accountNumber: "005322", accountHolder: "大栄管機(株)" },
     ]
 };
 
@@ -62,7 +61,14 @@ const DestLabels: Record<DeliveryDestination, string> = {
     site: '現場', factory: '工場', office: '事務所', home: 'ご自宅', bring: 'ご持参', carrier: '運送便', none: '未指定'
 };
 
-const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false }: { slip: Slip, pageNum?: number, totalPages?: number, forceDisplayPrice?: boolean }) => {
+const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settings }: {
+    slip: Slip,
+    pageNum?: number,
+    totalPages?: number,
+    forceDisplayPrice?: boolean,
+    settings: AppSettings | null
+}) => {
+    const info = settings || DEFAULT_COMPANY_INFO;
     const isReturn = slip.type === 'return' || (slip.items && slip.items.some(i => (i.deliveredQuantity ?? i.quantity) < 0));
     const isCover = slip.type === 'cover';
     const isGlobal = slip.constructionName === '全現場一括集計';
@@ -93,9 +99,9 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false }: { sl
                         </div>
                         <div className="flex gap-4 items-start text-right text-[10px]">
                             <div>
-                                <h3 className="text-base font-bold mb-0.5">{COMPANY_INFO.name}</h3>
-                                <p>{COMPANY_INFO.zipCode} {COMPANY_INFO.address}</p>
-                                <p className="mt-1 font-bold">登録番号: {COMPANY_INFO.invoiceNumber}</p>
+                                <h3 className="text-base font-bold mb-0.5">{info.companyName}</h3>
+                                <p>{info.postalCode} {info.address}</p>
+                                <p className="mt-1 font-bold">登録番号: {info.invoiceNumber}</p>
                                 <p className="mt-1 text-slate-500">発行日: {new Date().toLocaleDateString('ja-JP')}</p>
                             </div>
                         </div>
@@ -135,11 +141,11 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false }: { sl
                             <div className="flex-grow">
                                 <div className="font-bold text-slate-600 underline decoration-slate-300 mb-2 text-[10px]">【お振込先】</div>
                                 <div className="grid grid-cols-1 gap-y-1.5 text-[10px]">
-                                    {COMPANY_INFO.banks.map((bank, idx) => (
+                                    {(info.banks || []).map((bank, idx) => (
                                         <div key={idx} className="flex items-center border-b border-slate-100 pb-1">
                                             <div className="flex flex-col">
-                                                <span className="font-bold whitespace-nowrap">{bank.name}</span>
-                                                <span className="font-mono text-slate-600">{bank.type} {bank.number}</span>
+                                                <span className="font-bold whitespace-nowrap">{bank.bankName} {bank.branchName}</span>
+                                                <span className="font-mono text-slate-600">{bank.accountType} {bank.accountNumber} {bank.accountHolder}</span>
                                             </div>
                                         </div>
                                     ))}
@@ -185,11 +191,11 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false }: { sl
                         </div>
                     </div>
                     <div className="w-[40%] text-right text-[10px]">
-                        <h3 className="text-sm font-bold mb-1">{COMPANY_INFO.name}</h3>
-                        <p>{COMPANY_INFO.zipCode} {COMPANY_INFO.address}</p>
-                        <p className="mt-1 font-bold">TEL: {COMPANY_INFO.phone} / FAX: {COMPANY_INFO.fax}</p>
-                        <p className="font-bold">Email: {COMPANY_INFO.email}</p>
-                        <p className="mt-1 font-black">登録番号: {COMPANY_INFO.invoiceNumber}</p>
+                        <h3 className="text-sm font-bold mb-1">{info.companyName}</h3>
+                        <p>{info.postalCode} {info.address}</p>
+                        <p className="mt-1 font-bold">TEL: {info.phone} / FAX: {info.fax}</p>
+                        <p className="font-bold">Email: {info.email}</p>
+                        <p className="mt-1 font-black">登録番号: {info.invoiceNumber}</p>
                         <div className="mt-1 font-bold">受付担当: {slip.receivingPerson || '本部'}</div>
                     </div>
                 </div>
@@ -345,9 +351,10 @@ export const SlipManager: React.FC<{
     customers: Customer[];
     pricingRules: PricingRule[];
     masterItems: MaterialItem[];
+    settings: AppSettings | null;
     onTabChange?: (tab: 'create' | 'pending' | 'reslip' | 'history') => void;
     onEditModeChange?: (isEditing: boolean) => void;
-}> = ({ mode, initialTab = 'create', onClose, cart, onUpdateCart, onClearCart, defaultCustomer, customers, pricingRules, masterItems, onTabChange, onEditModeChange }) => {
+}> = ({ mode, initialTab = 'create', onClose, cart, onUpdateCart, onClearCart, defaultCustomer, customers, pricingRules, masterItems, settings, onTabChange, onEditModeChange }) => {
     const [activeTab, setActiveTab] = useState<'create' | 'pending' | 'reslip' | 'history'>(initialTab);
     const [activeMode, setActiveMode] = useState<'sales' | 'return'>(mode);
 
@@ -443,6 +450,50 @@ export const SlipManager: React.FC<{
     const handleAddFromMaster = (item: MaterialItem) => {
         onUpdateCart(prev => [...prev, { ...item, quantity: 1, appliedPrice: item.sellingPrice, deliveredQuantity: 1 }]);
         setItemSearchQuery(''); setShowItemSuggestions(false);
+    };
+
+    const handleManualAdd = () => {
+        const newItem: SlipItem = {
+            id: `manual-${Date.now()}`,
+            category: '消耗品・雑材',
+            name: '',
+            model: '',
+            dimensions: '',
+            quantity: 1,
+            unit: '個',
+            location: '',
+            listPrice: 0,
+            sellingPrice: 0,
+            costPrice: 0,
+            appliedPrice: 0,
+            deliveredQuantity: 1,
+            updatedAt: Date.now()
+        };
+        onUpdateCart(prev => [...prev, newItem]);
+    };
+
+    const handleRegisterToMaster = async (item: SlipItem) => {
+        if (!item.name) return alert('品名を入力してください');
+        if (window.confirm(`${item.name} (${item.model}) を資材マスターに登録しますか？`)) {
+            const materialData: Omit<MaterialItem, 'id' | 'updatedAt'> = {
+                name: item.name,
+                model: item.model || '',
+                dimensions: item.dimensions || '',
+                manufacturer: item.manufacturer || '',
+                category: item.category || '消耗品・雑材',
+                unit: item.unit || '個',
+                costPrice: item.costPrice || 0,
+                listPrice: item.listPrice || 0,
+                sellingPrice: item.sellingPrice || item.appliedPrice || 0,
+                quantity: 0,
+                location: '',
+                notes: '伝票から自動登録'
+            };
+            await storage.addMaterial(materialData);
+            alert('資材マスターに登録しました。');
+            // IDを更新して、再登録を防ぐ
+            onUpdateCart(prev => prev.map(i => i.id === item.id ? { ...i, id: 'registered-' + Date.now() } : i));
+        }
     };
 
 
@@ -807,7 +858,7 @@ export const SlipManager: React.FC<{
                                 <div className="flex flex-col items-center gap-8 origin-top" style={{ transform: `scale(${previewScale})` }}>
                                     {printingSlips.map((s, i) => (
                                         <div key={s.id || i} className="bg-white shadow-2xl shrink-0" style={{ width: '210mm', height: '297mm', overflow: 'hidden' }}>
-                                            <SlipPage slip={s} pageNum={i + 1} totalPages={printingSlips.length} forceDisplayPrice={forceDisplayPrice} />
+                                            <SlipPage slip={s} pageNum={i + 1} totalPages={printingSlips.length} forceDisplayPrice={forceDisplayPrice} settings={settings} />
                                         </div>
                                     ))}
                                 </div>
@@ -820,7 +871,7 @@ export const SlipManager: React.FC<{
                         <div id="slip-print-portal">
                             {printingSlips.map((s, i) => (
                                 <div key={`print-${s.id || i}`} className="slip-print-page">
-                                    <SlipPage slip={s} pageNum={i + 1} totalPages={printingSlips.length} forceDisplayPrice={forceDisplayPrice} />
+                                    <SlipPage slip={s} pageNum={i + 1} totalPages={printingSlips.length} forceDisplayPrice={forceDisplayPrice} settings={settings} />
                                 </div>
                             ))}
                         </div>,
@@ -881,15 +932,48 @@ export const SlipManager: React.FC<{
                                         <div className="relative"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">日付</label><input type="date" value={slipDate} onChange={e => setSlipDate(e.target.value)} className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold" /></div>
                                     </div>
                                     <div className="border-t pt-6">
-                                        <div className="relative mb-6">
-                                            <Search className="absolute left-4 top-3.5 text-slate-400" size={18} />
-                                            <input value={itemSearchQuery} onChange={e => { setItemSearchQuery(e.target.value); setShowItemSuggestions(true); }} placeholder="複数キーワードで資材を検索（例: VP 50 エルボ）" className="w-full pl-12 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold focus:border-blue-500 transition-all outline-none shadow-inner" />
-                                            {showItemSuggestions && itemSuggestions.length > 0 && (<div className="absolute top-full left-0 right-0 bg-white border shadow-2xl z-30 rounded-[1.5rem] mt-2 max-h-64 overflow-y-auto">{itemSuggestions.map(i => (<div key={i.id} onClick={() => handleAddFromMaster(i)} className="p-4 hover:bg-blue-50 cursor-pointer border-b last:border-0 flex justify-between items-center font-bold text-sm">{i.name} <span className="text-[10px] bg-slate-100 px-2 py-1 rounded font-mono ml-2">{i.model} {i.dimensions}</span></div>))}</div>)}
+                                        <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 grow flex flex-col min-h-0">
+                                            <div className="flex justify-between items-center mb-6">
+                                                <h3 className="text-sm font-black flex items-center gap-2"><ShoppingCart size={18} className="text-blue-600" /> 出庫資材リスト ({cart.length})</h3>
+                                                <div className="flex gap-2">
+                                                    <button onClick={handleManualAdd} className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-xl text-[10px] font-black hover:bg-slate-800 transition-all shadow-md active:scale-95">
+                                                        <Plus size={14} /> 自由入力行を追加
+                                                    </button>
+                                                    <button onClick={() => onClearCart()} className="flex items-center gap-2 px-4 py-2 bg-rose-50 text-rose-600 rounded-xl text-[10px] font-black hover:bg-rose-100 transition-colors">
+                                                        <Trash2 size={14} /> 全て削除
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div className="relative mb-6">
+                                                <Search className="absolute left-4 top-3.5 text-slate-400" size={18} />
+                                                <input value={itemSearchQuery} onChange={e => { setItemSearchQuery(e.target.value); setShowItemSuggestions(true); }} placeholder="複数キーワードで資材を検索（例: VP 50 エルボ）" className="w-full pl-12 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold focus:border-blue-500 transition-all outline-none shadow-inner" />
+                                                {showItemSuggestions && itemSuggestions.length > 0 && (<div className="absolute top-full left-0 right-0 bg-white border shadow-2xl z-30 rounded-[1.5rem] mt-2 max-h-64 overflow-y-auto">{itemSuggestions.map(i => (<div key={i.id} onClick={() => handleAddFromMaster(i)} className="p-4 hover:bg-blue-50 cursor-pointer border-b last:border-0 flex justify-between items-center font-bold text-sm">{i.name} <span className="text-[10px] bg-slate-100 px-2 py-1 rounded font-mono ml-2">{i.model} {i.dimensions}</span></div>))}</div>)}
+                                            </div>
+                                            <table className="w-full text-sm">
+                                                <thead><tr className="text-slate-400 text-[10px] uppercase font-black tracking-widest border-b pb-2"><th className="pb-2 text-left">品名 / 明細</th><th className="w-24 text-center pb-2">数量</th><th className="w-28 text-center pb-2">単価(¥)</th><th className="w-12"></th></tr></thead>
+                                                <tbody className="divide-y">{cart.map((item, idx) => (<tr key={idx} className="group hover:bg-slate-50"><td className="py-4">
+                                                    <div className="flex flex-col">
+                                                        <input
+                                                            value={item.name}
+                                                            onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, name: e.target.value } : pi))}
+                                                            placeholder="品名"
+                                                            className="w-full bg-transparent border-none font-bold text-slate-800 outline-none"
+                                                        />
+                                                        <div className="flex items-center gap-1 mt-1">
+                                                            <div className="px-1.5 py-0.5 bg-slate-100 text-[8px] font-black text-slate-400 rounded border border-slate-200">自由入力</div>
+                                                            {!item.id.startsWith('registered-') && (
+                                                                <button
+                                                                    onClick={() => handleRegisterToMaster(item)}
+                                                                    className="flex items-center gap-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-600 text-[8px] font-black rounded border border-emerald-100 hover:bg-emerald-100 transition-colors"
+                                                                >
+                                                                    <Database size={8} /> マスタ登録
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </td><td className="text-center"><input type="number" value={item.quantity} onChange={e => { const n = [...cart]; n[idx].quantity = parseInt(e.target.value) || 0; onUpdateCart(n); }} className="w-full py-2 border rounded-xl text-center font-black bg-slate-50 no-spin-buttons outline-none focus:border-blue-400" /></td><td className="text-center"><input type="number" value={item.appliedPrice || 0} onChange={e => { const n = [...cart]; n[idx].appliedPrice = parseInt(e.target.value) || 0; onUpdateCart(n); }} className="w-full py-2 border rounded-xl text-center font-black bg-slate-50 no-spin-buttons outline-none focus:border-blue-400 text-emerald-600" /></td><td className="text-right"><button onClick={() => onUpdateCart(cart.filter((_, i) => i !== idx))} className="p-2 text-rose-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"><Trash2 size={18} /></button></td></tr>))}</tbody>
+                                            </table>
                                         </div>
-                                        <table className="w-full text-sm">
-                                            <thead><tr className="text-slate-400 text-[10px] uppercase font-black tracking-widest border-b pb-2"><th className="pb-2 text-left">品名 / 明細</th><th className="w-24 text-center pb-2">数量</th><th className="w-28 text-center pb-2">単価(¥)</th><th className="w-12"></th></tr></thead>
-                                            <tbody className="divide-y">{cart.map((item, idx) => (<tr key={idx} className="group hover:bg-slate-50"><td className="py-4"><div>{item.name}</div><div className="text-[10px] text-slate-400 font-mono truncate max-w-[240px]">{item.model} {item.dimensions}</div></td><td className="text-center"><input type="number" value={item.quantity} onChange={e => { const n = [...cart]; n[idx].quantity = parseInt(e.target.value) || 0; onUpdateCart(n); }} className="w-full py-2 border rounded-xl text-center font-black bg-slate-50 no-spin-buttons outline-none focus:border-blue-400" /></td><td className="text-center"><input type="number" value={item.appliedPrice || 0} onChange={e => { const n = [...cart]; n[idx].appliedPrice = parseInt(e.target.value) || 0; onUpdateCart(n); }} className="w-full py-2 border rounded-xl text-center font-black bg-slate-50 no-spin-buttons outline-none focus:border-blue-400 text-emerald-600" /></td><td className="text-right"><button onClick={() => onUpdateCart(cart.filter((_, i) => i !== idx))} className="p-2 text-rose-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"><Trash2 size={18} /></button></td></tr>))}</tbody>
-                                        </table>
                                     </div>
                                 </div>
                             </div>
@@ -981,8 +1065,9 @@ export const SlipManager: React.FC<{
                                     <div className="flex items-center gap-4 w-full md:w-auto overflow-hidden">
                                         <div className={`w-12 h-12 md:w-16 md:h-16 shrink-0 ${activeTab === 'reslip' ? 'bg-orange-50 text-orange-600' : 'bg-blue-50 text-blue-600'} rounded-[1.5rem] flex items-center justify-center shadow-inner`}><FileText size={24} className="md:w-8 md:h-8" /></div>
                                         <div className="min-w-0 flex-1">
-                                            <div className="font-black text-base md:text-lg text-slate-900 leading-tight whitespace-nowrap overflow-hidden text-ellipsis">
-                                                {s.customerName} <span className="text-xs text-slate-400 ml-2 font-bold tracking-tight inline-block">({formatSiteName(s.constructionName)})</span>
+                                            <div className="font-black text-base md:text-lg text-slate-900 leading-tight whitespace-nowrap overflow-hidden text-ellipsis flex items-center gap-2">
+                                                {s.customerName} <span className="text-xs text-slate-400 font-bold tracking-tight inline-block">({formatSiteName(s.constructionName)})</span>
+                                                {s.source === 'link' && <span className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-[9px] px-2 py-0.5 rounded-full font-black animate-pulse shadow-sm">LINK注文</span>}
                                             </div>
                                             <div className="text-[10px] text-slate-400 font-mono mt-1 font-bold uppercase tracking-widest flex items-center gap-2">
                                                 <span>{new Date(s.createdAt).toLocaleString()}</span>
@@ -1008,6 +1093,20 @@ export const SlipManager: React.FC<{
                                                 <span className="md:hidden">再作成</span><span className="hidden md:inline">欠品分を再作成</span>
                                             </button>
                                         )}
+                                        <button
+                                            onClick={() => {
+                                                const info = settings || DEFAULT_COMPANY_INFO;
+                                                const customer = customers.find(c => c.name === s.customerName);
+                                                const email = customer?.email || "";
+                                                const subject = `【${info.companyName}】${getSlipLabel(s.type, s.constructionName)}のご案内 (#${s.slipNumber})`;
+                                                const body = `${s.customerName} 様\n\n平素より大変お世話になっております。${info.companyName}でございます。\n${s.constructionName || "一般"} 現場の${getSlipLabel(s.type, s.constructionName)}をお送りいたします。\n\n詳細につきましては、本メールまたはシステム画面よりご確認ください。\n\n--------------------------------------------------\n発行番号: ${s.slipNumber}\n発行日: ${s.date}\n計金額 (税抜): ¥${(s.totalAmount || 0).toLocaleString()}\n--------------------------------------------------\n\nご確認のほど何卒よろしくお願い申し上げます。\n\n${info.companyName}\n${info.address}\nTEL: ${info.phone}\n${info.email}`;
+                                                window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+                                            }}
+                                            className="p-3 text-slate-500 hover:text-blue-500 hover:bg-blue-50 rounded-2xl transition-all"
+                                            title="メールで送信"
+                                        >
+                                            <Mail size={20} />
+                                        </button>
                                         <button onClick={() => s.id && window.confirm('削除しますか？') && storage.deleteSlip(s.id)} className="p-3 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-2xl transition-all"><Trash2 size={20} /></button>
                                     </div>
                                 </div>

@@ -93,7 +93,8 @@ export const MaterialForm: React.FC<MaterialFormProps> = ({ onSave, onClose, ini
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave({
+
+    const currentData = {
       category: formData.category,
       name: formData.name,
       manufacturer: formData.manufacturer,
@@ -108,7 +109,9 @@ export const MaterialForm: React.FC<MaterialFormProps> = ({ onSave, onClose, ini
       sellingPrice: Number(formData.sellingPrice) || 0,
       costPrice: Number(formData.costPrice) || 0,
       sourceUrl: formData.sourceUrl,
-    });
+    };
+
+    onSave(currentData);
   };
 
   return (

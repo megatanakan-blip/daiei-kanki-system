@@ -2,7 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { PricingRule, MaterialItem, Customer, MATERIAL_CATEGORIES } from '../types';
 // Fixed: Added missing Loader2 import from lucide-react
-import { Plus, Trash2, X, Users, Tag, ArrowLeft, ChevronDown, ChevronRight, CheckSquare, Square, Save, UserCheck, Layers, Search, MapPin, AlertCircle, Loader2 } from 'lucide-react';
+import { Plus, Trash2, X, Users, Tag, ArrowLeft, ChevronDown, ChevronRight, CheckSquare, Square, Save, UserCheck, Layers, Search, MapPin, AlertCircle, Loader2, Edit3 } from 'lucide-react';
 import * as storage from '../services/firebaseService';
 
 interface PricingManagerProps {
@@ -17,6 +17,7 @@ export const PricingManager = ({ rules, customers, items, onClose }: PricingMana
     const [targetCustomers, setTargetCustomers] = useState<Customer[]>([]);
     const [listSelected, setListSelected] = useState<Set<string>>(new Set<string>());
     const [newCustomerInput, setNewCustomerInput] = useState('');
+    const [newCustomerEmail, setNewCustomerEmail] = useState('');
     const [newCustomerClosingDay, setNewCustomerClosingDay] = useState<number>(99);
     const [method, setMethod] = useState<'percent_of_list' | 'markup_on_cost'>('percent_of_list');
     const [value, setValue] = useState('');
@@ -82,8 +83,9 @@ export const PricingManager = ({ rules, customers, items, onClose }: PricingMana
     const handleRegisterCustomer = async () => {
         const name = newCustomerInput.trim();
         if (!name) return;
-        await storage.addCustomer({ name, closingDay: newCustomerClosingDay });
+        await storage.addCustomer({ name, closingDay: newCustomerClosingDay, email: newCustomerEmail.trim() });
         setNewCustomerInput('');
+        setNewCustomerEmail('');
     };
 
     const handleToggleListSelection = (custId: string) => {
@@ -142,6 +144,28 @@ export const PricingManager = ({ rules, customers, items, onClose }: PricingMana
         }
     };
 
+    const [editingCustomer, setEditingCustomer] = useState<string | null>(null);
+    const [editName, setEditName] = useState('');
+    const [editEmail, setEditEmail] = useState('');
+    const [editClosingDay, setEditClosingDay] = useState(99);
+
+    const handleUpdateCustomer = async () => {
+        if (!editingCustomer || !editName.trim()) return;
+        setIsSaving(true);
+        try {
+            await storage.updateCustomer(editingCustomer, {
+                name: editName.trim(),
+                email: editEmail.trim(),
+                closingDay: editClosingDay
+            });
+            setEditingCustomer(null);
+        } catch (err) {
+            alert('顧客情報の更新に失敗しました');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
     if (view === 'list') {
         return (
             <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
@@ -150,21 +174,62 @@ export const PricingManager = ({ rules, customers, items, onClose }: PricingMana
                     <div className="p-8 bg-slate-50 flex flex-col gap-8 overflow-y-auto">
                         <div className="bg-white p-6 rounded-xl border border-blue-200">
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-2">新しい顧客を登録</label>
-                            <div className="flex gap-2 mb-2">
-                                <select value={newCustomerClosingDay} onChange={e => setNewCustomerClosingDay(parseInt(e.target.value))} className="w-1/3 px-3 py-3 border rounded-lg font-bold"><option value={99}>末日締め</option><option value={20}>20日締め</option><option value={25}>25日締め</option></select>
-                                <input type="text" value={newCustomerInput} onChange={e => setNewCustomerInput(e.target.value)} placeholder="顧客名" className="w-2/3 px-4 py-3 border rounded-lg font-bold" />
+                            <div className="flex flex-col gap-2 mb-2">
+                                <div className="flex gap-2">
+                                    <select value={newCustomerClosingDay} onChange={e => setNewCustomerClosingDay(parseInt(e.target.value))} className="w-1/3 px-3 py-3 border rounded-lg font-bold"><option value={99}>末日締め</option><option value={20}>20日締め</option><option value={25}>25日締め</option></select>
+                                    <input type="text" value={newCustomerInput} onChange={e => setNewCustomerInput(e.target.value)} placeholder="顧客名" className="w-2/3 px-4 py-3 border rounded-lg font-bold" />
+                                </div>
+                                <input type="email" value={newCustomerEmail} onChange={e => setNewCustomerEmail(e.target.value)} placeholder="メールアドレス (電子帳票送信先)" className="w-full px-4 py-3 border rounded-lg font-bold" />
                             </div>
                             <button className="w-full py-3 bg-blue-600 text-white font-bold rounded-lg" onClick={handleRegisterCustomer}>登録</button>
                         </div>
                         <div className="space-y-2">
                             {(customers as Customer[]).map(cust => {
                                 const isSelected = listSelected.has(cust.id);
+                                const isEditing = editingCustomer === cust.id;
+
+                                if (isEditing) {
+                                    return (
+                                        <div key={cust.id} className="bg-white p-4 rounded-xl border-2 border-blue-500 shadow-lg space-y-3">
+                                            <div className="flex gap-2">
+                                                <select value={editClosingDay} onChange={e => setEditClosingDay(parseInt(e.target.value))} className="w-1/3 px-2 py-2 border rounded-lg text-sm font-bold"><option value={99}>末日締め</option><option value={20}>20日締め</option><option value={25}>25日締め</option></select>
+                                                <input type="text" value={editName} onChange={e => setEditName(e.target.value)} className="w-2/3 px-3 py-2 border rounded-lg text-sm font-bold" placeholder="顧客名" />
+                                            </div>
+                                            <input type="email" value={editEmail} onChange={e => setEditEmail(e.target.value)} className="w-full px-3 py-2 border rounded-lg text-sm font-bold" placeholder="メールアドレス" />
+                                            <div className="flex gap-2">
+                                                <button onClick={() => setEditingCustomer(null)} className="flex-1 py-2 bg-slate-100 text-slate-600 font-bold rounded-lg text-xs">キャンセル</button>
+                                                <button onClick={handleUpdateCustomer} className="flex-1 py-2 bg-blue-600 text-white font-bold rounded-lg text-xs">更新を保存</button>
+                                            </div>
+                                        </div>
+                                    );
+                                }
+
                                 return (
-                                    <div key={cust.id} className={`flex items-center gap-3 p-3 rounded-lg border bg-white ${isSelected ? 'border-blue-300 bg-blue-50' : ''}`}>
+                                    <div key={cust.id} className={`flex items-center gap-3 p-3 rounded-lg border bg-white group ${isSelected ? 'border-blue-300 bg-blue-50' : ''}`}>
                                         <button onClick={() => handleToggleListSelection(cust.id)} className={isSelected ? 'text-blue-600' : 'text-slate-300'}>{isSelected ? <CheckSquare size={20} /> : <Square size={20} />}</button>
                                         <div onClick={() => { setTargetCustomers([cust]); setView('edit'); }} className="flex-grow flex justify-between cursor-pointer">
-                                            <span className="font-bold text-slate-700">{cust.name}</span>
-                                            <ChevronRight size={18} className="text-slate-300" />
+                                            <div className="flex flex-col">
+                                                <span className="font-bold text-slate-700">{cust.name}</span>
+                                                {cust.email && <span className="text-[10px] text-slate-400 font-mono">{cust.email}</span>}
+                                            </div>
+                                            <ChevronRight size={18} className="text-slate-300 group-hover:text-blue-500 transition-colors" />
+                                        </div>
+                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setEditingCustomer(cust.id);
+                                                    setEditName(cust.name);
+                                                    setEditEmail(cust.email || '');
+                                                    setEditClosingDay(cust.closingDay || 99);
+                                                }}
+                                                className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-blue-600"
+                                            >
+                                                <Edit3 size={16} />
+                                            </button>
+                                            <button onClick={(e) => { e.stopPropagation(); if (window.confirm('この顧客を削除してもよろしいですか？関連する単価ルールも削除される可能性があります。')) storage.deleteCustomer(cust.id); }} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-500">
+                                                <Trash2 size={16} />
+                                            </button>
                                         </div>
                                     </div>
                                 );
