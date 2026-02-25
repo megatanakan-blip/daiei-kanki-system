@@ -61,16 +61,26 @@ const DestLabels: Record<DeliveryDestination, string> = {
     site: '現場', factory: '工場', office: '事務所', home: 'ご自宅', bring: 'ご持参', carrier: '運送便', none: '未指定'
 };
 
-const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settings }: {
+const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settings, onUpdateSlip }: {
     slip: Slip,
     pageNum?: number,
     totalPages?: number,
     forceDisplayPrice?: boolean,
-    settings: AppSettings | null
+    settings: AppSettings | null,
+    onUpdateSlip?: (updates: Partial<Slip>) => void
 }) => {
     const info = settings || DEFAULT_COMPANY_INFO;
     const isReturn = slip.type === 'return' || (slip.items && slip.items.some(i => (i.deliveredQuantity ?? i.quantity) < 0));
     const isCover = slip.type === 'cover';
+
+    // 内部計算用の値を抽出
+    const prevAmt = slip.previousBillingAmount || 0;
+    const payRec = slip.paymentReceived || 0;
+    const carriedForward = prevAmt - payRec;
+    const currentSales = slip.totalAmount || 0;
+    const currentTax = slip.taxAmount || 0;
+    const currentGrandTotal = carriedForward + currentSales + currentTax;
+
     const isGlobal = slip.constructionName === '全現場一括集計';
     const isDetail = slip.type === 'invoice' || slip.type === 'delivery';
 
@@ -107,22 +117,46 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                         </div>
                     </div>
                     <div className="flex flex-col flex-grow gap-4 min-h-0">
-                        <div className="bg-slate-50 p-6 rounded-2xl border-2 border-slate-900 flex flex-col justify-center shrink-0 shadow-sm relative overflow-hidden">
-                            <div className="absolute top-0 right-0 bg-slate-900 text-white text-[8px] px-3 py-1 font-bold uppercase tracking-[0.2em]">{isGlobal ? 'Invoice Total' : 'Site Total'}</div>
-                            <div className="flex justify-between items-end mb-3 border-b border-slate-300 pb-2">
-                                <div className="space-y-1">
-                                    <div className="flex gap-4 text-[10px] font-bold text-slate-600">
-                                        <span>税抜合計: ¥{(slip.totalAmount || 0).toLocaleString()}</span>
-                                        <span>消費税 (10%): ¥{(slip.taxAmount || 0).toLocaleString()}</span>
-                                    </div>
-                                </div>
-                                <div className="text-right">
-                                    <div className="text-xs font-black text-slate-900">{isGlobal ? '御請求金額合計 (税込)' : '現場別集計金額 (税込)'}</div>
-                                </div>
-                            </div>
-                            <div className="text-6xl font-mono font-bold text-center border-b-8 border-double border-slate-900 pb-2 tabular-nums">
-                                ¥{(slip.grandTotal || 0).toLocaleString()}-
-                            </div>
+                        {/* 請求内訳テーブル */}
+                        <div className="w-full shrink-0">
+                            <table className="w-full border-collapse border-b-2 border-slate-900 border-x-2 border-t text-[10px]">
+                                <thead>
+                                    <tr className="bg-slate-50 border-b border-slate-900">
+                                        <th className="py-1 px-2 border-r border-slate-400 text-center font-bold w-[16%] text-[9px]">前回御請求額</th>
+                                        <th className="py-1 px-2 border-r border-slate-400 text-center font-bold w-[16%] text-[9px]">今回御入金額</th>
+                                        <th className="py-1 px-2 border-r border-slate-400 text-center font-bold w-[16%] text-[9px]">繰越残高</th>
+                                        <th className="py-1 px-2 border-r border-slate-400 text-center font-bold w-[18%] text-[9px]">今回売上額(税抜)</th>
+                                        <th className="py-1 px-2 border-r border-slate-400 text-center font-bold w-[14%] text-[9px]">消費税(10%)</th>
+                                        <th className="py-1 px-2 text-center font-bold w-[20%] bg-slate-900 text-white text-[9px]">今回御請求額</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr className="h-10 text-center text-sm font-mono font-bold">
+                                        <td className="border-r border-slate-300 px-1 relative">
+                                            <input
+                                                type="number"
+                                                value={prevAmt}
+                                                onChange={(e) => onUpdateSlip?.({ previousBillingAmount: parseInt(e.target.value) || 0 })}
+                                                className="w-full text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-1 print:hidden"
+                                            />
+                                            <span className="hidden print:block">¥{prevAmt.toLocaleString()}</span>
+                                        </td>
+                                        <td className="border-r border-slate-300 px-1 relative">
+                                            <input
+                                                type="number"
+                                                value={payRec}
+                                                onChange={(e) => onUpdateSlip?.({ paymentReceived: parseInt(e.target.value) || 0 })}
+                                                className="w-full text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-1 print:hidden"
+                                            />
+                                            <span className="hidden print:block">¥{payRec.toLocaleString()}</span>
+                                        </td>
+                                        <td className="border-r border-slate-300">¥{carriedForward.toLocaleString()}</td>
+                                        <td className="border-r border-slate-300">¥{currentSales.toLocaleString()}</td>
+                                        <td className="border-r border-slate-300">¥{currentTax.toLocaleString()}</td>
+                                        <td className="bg-slate-50 text-base font-black border-slate-900 border-l-2">¥{currentGrandTotal.toLocaleString()}-</td>
+                                    </tr>
+                                </tbody>
+                            </table>
                         </div>
                         {isGlobal && slip.siteSummaries && (
                             <div className="border rounded-xl overflow-hidden shadow-sm bg-white flex flex-col flex-grow max-h-[480px]">
@@ -139,7 +173,7 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                         )}
                         <div className="mt-auto pt-4 border-t border-slate-200 shrink-0 flex justify-between items-end gap-8">
                             <div className="flex-grow">
-                                <div className="font-bold text-slate-600 underline decoration-slate-300 mb-2 text-[10px]">【お振込先】</div>
+                                <div className="font-bold text-slate-600 underline decoration-slate-300 mb-2 text-[10px]">【振込先】</div>
                                 <div className="grid grid-cols-1 gap-y-1.5 text-[10px]">
                                     {(info.banks || []).map((bank, idx) => (
                                         <div key={idx} className="flex items-center border-b border-slate-100 pb-1">
@@ -655,7 +689,8 @@ export const SlipManager: React.FC<{
                 id: 'cover-' + Date.now(), customerName: cName, constructionName: '全現場一括集計', items: [], totalAmount: totalNet,
                 taxAmount: totalTax, grandTotal: totalNet + totalTax, date: new Date().toISOString().slice(0, 10), type: 'cover',
                 createdAt: Date.now(), siteSummaries: siteEntries.map(([name, total]) => ({ name, total })), deliveryTime: 'none', deliveryDestination: 'none',
-                slipNumber: `INV-${targetMonth.replace('-', '')}`, isClosed: true
+                slipNumber: `INV-${targetMonth.replace('-', '')}`, isClosed: true,
+                previousBillingAmount: 0, paymentReceived: 0, carriedForwardAmount: 0
             } as Slip);
         }
 
@@ -856,9 +891,18 @@ export const SlipManager: React.FC<{
                         <div className="flex-grow w-full overflow-auto bg-slate-900 relative">
                             <div className="flex flex-col items-center py-8 origin-top min-h-full" style={{ minWidth: `calc(210mm * ${previewScale} + 64px)` }}>
                                 <div className="flex flex-col items-center gap-8 origin-top" style={{ transform: `scale(${previewScale})` }}>
-                                    {printingSlips.map((s, i) => (
-                                        <div key={s.id || i} className="bg-white shadow-2xl shrink-0" style={{ width: '210mm', height: '297mm', overflow: 'hidden' }}>
-                                            <SlipPage slip={s} pageNum={i + 1} totalPages={printingSlips.length} forceDisplayPrice={forceDisplayPrice} settings={settings} />
+                                    {printingSlips.map((slip, idx) => (
+                                        <div key={slip.id || idx} className="bg-white shadow-2xl shrink-0" style={{ width: '210mm', height: '297mm', overflow: 'hidden' }}>
+                                            <SlipPage
+                                                slip={slip}
+                                                pageNum={idx + 1}
+                                                totalPages={printingSlips.length}
+                                                forceDisplayPrice={forceDisplayPrice}
+                                                settings={settings}
+                                                onUpdateSlip={(updates) => {
+                                                    setPrintingSlips(prev => prev.map((s, i) => i === idx ? { ...s, ...updates } : s));
+                                                }}
+                                            />
                                         </div>
                                     ))}
                                 </div>

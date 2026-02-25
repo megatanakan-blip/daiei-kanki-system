@@ -117,6 +117,10 @@ export interface Slip {
   issuerPerson?: string;
   isHandled?: boolean;
   source?: 'link' | 'core';
+  // 請求書用追加フィールド
+  previousBillingAmount?: number; // 前回御請求額
+  paymentReceived?: number;       // 今回御入金額
+  carriedForwardAmount?: number;  // 繰越残高
 }
 
 export type EstimateStatus = 'pending' | 'accepted' | 'rejected' | 'converted';

@@ -48,6 +48,7 @@ export const AITakahashi: React.FC<AITakahashiProps> = ({ masterItems, onAddToCa
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<{ file: File, base64: string } | null>(null);
+  const [isHovered, setIsHovered] = useState(false);
 
   const defaultMessage: Message = {
     role: 'model',
@@ -224,8 +225,8 @@ export const AITakahashi: React.FC<AITakahashiProps> = ({ masterItems, onAddToCa
 
   return (
     <div className="fixed bottom-4 right-4 md:bottom-6 md:right-6 z-[200] flex flex-col items-end max-w-full">
-      {!isOpen && helpMessage && (
-        <div onClick={() => setIsOpen(true)} className="mb-4 bg-white px-4 py-3 rounded-2xl rounded-br-none shadow-xl border border-blue-100 flex items-center gap-3 cursor-pointer hover:scale-105 transition-transform origin-bottom-right animate-bounce">
+      {!isOpen && helpMessage && isHovered && (
+        <div onClick={() => setIsOpen(true)} className="mb-4 bg-white px-4 py-3 rounded-2xl rounded-br-none shadow-xl border border-blue-100 flex items-center gap-3 cursor-pointer hover:scale-105 transition-all duration-300 origin-bottom-right animate-in fade-in slide-in-from-bottom-2">
           <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
             <Sparkles size={16} />
           </div>
@@ -408,6 +409,8 @@ export const AITakahashi: React.FC<AITakahashiProps> = ({ masterItems, onAddToCa
 
       <button
         onClick={() => setIsOpen(!isOpen)}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
         className={`w-12 h-12 sm:w-16 sm:h-16 rounded-2xl sm:rounded-[2rem] flex items-center justify-center shadow-2xl transition-all hover:scale-105 active:scale-95 ${isOpen ? 'bg-slate-900 text-white' : 'bg-blue-600 text-white ring-4 ring-blue-100'}`}
       >
         {isOpen ? <X size={20} /> : <MessageSquare size={20} />}
