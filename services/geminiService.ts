@@ -4,8 +4,13 @@ import { Material, MATERIAL_CATEGORIES } from "../types";
 import * as XLSX from 'xlsx';
 import { domainKnowledge } from './domainKnowledge';
 
-// APIキーは環境変数から取得
-const getAi = () => new GoogleGenAI({ apiKey: ((import.meta as any).env?.VITE_GEMINI_API_KEY) || (typeof process !== 'undefined' && process.env?.API_KEY) || "" });
+// APIキーは環境変数から取得（Viteの定義またはimport.meta.envを使用）
+const getApiKey = () => {
+  // @ts-ignore
+  return (import.meta.env?.VITE_GEMINI_API_KEY) || (typeof process !== 'undefined' ? process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY : '');
+};
+
+const getAi = () => new GoogleGenAI({ apiKey: getApiKey() || "" });
 
 const materialSchema = {
   type: Type.ARRAY,
@@ -182,7 +187,7 @@ export const chatWithTakahashi = async (messages: any[], masterItems: Material[]
   `;
 
   // Mock mode for test environment or missing API key
-  const apiKey = ((import.meta as any).env?.VITE_GEMINI_API_KEY) || (typeof process !== 'undefined' && process.env?.API_KEY);
+  const apiKey = getApiKey();
 
   if (!apiKey || (typeof apiKey === 'string' && apiKey.includes('PLACEHOLDER'))) {
     console.warn("AI Takahashi: Running in MOCK MODE due to missing API key.");
