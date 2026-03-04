@@ -1,10 +1,10 @@
-
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { Estimate, EstimateStatus, Customer, MaterialItem, SlipItem, AppSettings } from '../types';
-import { X, Printer, Search, FileText, Trash2, CheckCircle2, XCircle, Clock, ChevronRight, Loader2, Calendar, User, MapPin, Edit3, Plus, Minus, Save, RotateCcw, Camera, Sparkles, ShoppingCart, Mail } from 'lucide-react';
+import { X, Printer, Search, FileText, Trash2, CheckCircle2, XCircle, Clock, ChevronRight, Loader2, Calendar, User, MapPin, Edit3, Plus, Minus, Save, RotateCcw, Camera, Sparkles, ShoppingCart, Mail, GripVertical } from 'lucide-react';
 import * as storage from '../services/firebaseService';
 import { parseOrderMemo } from '../services/geminiService';
+import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 
 const DEFAULT_COMPANY_INFO: AppSettings = {
   companyName: "大栄管機株式会社",
@@ -20,7 +20,10 @@ const DEFAULT_COMPANY_INFO: AppSettings = {
   ]
 };
 
-const generateId = () => Math.random().toString(36).substring(2) + Date.now().toString(36);
+const generateId = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  return Math.random().toString(36).substring(2, 11) + Date.now().toString(36);
+};
 
 interface EstimateManagerProps {
   onClose: () => void;
@@ -144,16 +147,307 @@ const EstimateCoverPage = ({ estimate, isEditing, onUpdateMeta, pageTotals, sett
 };
 
 // Detail Page Component (Page 2+) - Item table only
-const EstimateDetailPage = ({ estimate, pageNumber, isEditing, onUpdateItem, onDeleteItem, masterItems, settings }: {
-  estimate: Estimate,
-  pageNumber: number,
+const EstimateItemRow = React.memo(({
+  item,
+  idx,
+  isEditing,
+  onUpdateItem,
+  onDeleteItem,
+  onSelectSuggestion,
+  suggestions,
+  suggestionIdx,
+  suggestionType,
+  setSuggestionIdx,
+  setSuggestionType,
+  setQuery
+}: {
+  item: SlipItem | undefined,
+  idx: number,
   isEditing: boolean,
   onUpdateItem: (idx: number, data: Partial<SlipItem>) => void,
   onDeleteItem: (idx: number) => void,
-  masterItems: MaterialItem[],
-  settings: AppSettings | null
+  onSelectSuggestion: (idx: number, item: MaterialItem) => void,
+  suggestions: MaterialItem[],
+  suggestionIdx: number | null,
+  suggestionType: 'name' | 'model' | null,
+  setSuggestionIdx: (idx: number | null) => void,
+  setSuggestionType: (type: 'name' | 'model' | null) => void,
+  setQuery: (q: string) => void
 }) => {
-  const info = settings || DEFAULT_COMPANY_INFO;
+  const amount = item ? (item.appliedPrice || 0) * (item.quantity || 0) : 0;
+
+  if (!item && !isEditing) {
+    return (
+      <tr key={`empty-${idx}`} className="border-b h-[10.5mm] print:h-[9mm] border-slate-200">
+        <td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td></td>
+        {isEditing && <td className="no-print"></td>}
+      </tr>
+    );
+  }
+
+  return (
+    <Draggable draggableId={item?.id || `new-${idx}`} index={idx} isDragDisabled={!isEditing}>
+      {(provided, snapshot) => (
+        <tr
+          ref={provided.innerRef}
+          {...provided.draggableProps}
+          {...provided.dragHandleProps}
+          className={`border-b h-[10.5mm] print:h-[9mm] border-slate-200 group transition-colors ${snapshot.isDragging ? 'bg-blue-100 shadow-xl ring-2 ring-blue-400 z-50 rounded-lg' : 'hover:bg-slate-50'}`}
+          style={provided.draggableProps.style}
+        >
+          <td className="text-center border-r text-[9px] font-mono relative">
+            {isEditing ? (
+              <div className="absolute inset-0 flex items-center justify-center cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 no-print">
+                <GripVertical size={12} />
+              </div>
+            ) : (
+              idx + 1
+            )}
+            <span className="print:inline hidden">{idx + 1}</span>
+          </td>
+          <td className="px-2 border-r relative">
+            {isEditing ? (
+              <div className="flex flex-col gap-0.5 relative">
+                <input
+                  type="text"
+                  value={item?.name || ''}
+                  onChange={e => { onUpdateItem(idx, { name: e.target.value }); setQuery(e.target.value); }}
+                  onFocus={e => { setSuggestionIdx(idx); setSuggestionType('name'); setQuery(e.target.value); }}
+                  className="w-full text-[10px] px-1 py-0.5 border rounded focus:ring-1 focus:ring-blue-300 outline-none font-bold"
+                  placeholder="品名"
+                />
+                {item?.manufacturer && <span className="text-[8px] text-slate-500 truncate">{item.manufacturer}</span>}
+                {suggestionIdx === idx && suggestionType === 'name' && suggestions.length > 0 && (
+                  <div className="absolute top-full left-0 z-50 bg-white border-2 border-blue-300 rounded-lg shadow-2xl w-96 max-h-64 overflow-auto">
+                    {suggestions.map((s, i) => (
+                      <div key={i} onClick={() => onSelectSuggestion(idx, s)} className="px-3 py-2 hover:bg-blue-50 cursor-pointer border-b last:border-b-0">
+                        <div className="font-bold text-[11px]">{s.name}</div>
+                        <div className="text-[9px] text-slate-500">{s.manufacturer} / {s.model}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col">
+                <span className="font-bold truncate text-[10px]">{item?.name}</span>
+                {item?.manufacturer && <span className="text-[8px] text-slate-500 truncate">{item.manufacturer}</span>}
+              </div>
+            )}
+          </td>
+          <td className="px-2 border-r relative font-medium">
+            {isEditing ? (
+              <div className="relative">
+                <input
+                  type="text"
+                  value={`${item?.model || ''} ${item?.dimensions || ''}`.trim()}
+                  onChange={e => { const [model, ...dims] = e.target.value.split(' '); onUpdateItem(idx, { model, dimensions: dims.join(' ') }); setQuery(e.target.value); }}
+                  onFocus={e => { setSuggestionIdx(idx); setSuggestionType('model'); setQuery(e.target.value); }}
+                  className="w-full text-[10px] px-1 py-0.5 border rounded"
+                  placeholder="型式 寸法"
+                />
+                {suggestionIdx === idx && suggestionType === 'model' && suggestions.length > 0 && (
+                  <div className="absolute top-full left-0 z-50 bg-white border-2 border-blue-300 rounded-lg shadow-2xl w-96 max-h-64 overflow-auto mt-1">
+                    {suggestions.map(s => (
+                      <div key={s.id} onClick={() => onSelectSuggestion(idx, s)} className="px-3 py-2 hover:bg-blue-50 cursor-pointer border-b border-slate-100 last:border-0">
+                        <div className="font-bold text-xs text-slate-800">{s.name}</div>
+                        <div className="text-[10px] text-slate-500 mt-0.5">{s.manufacturer} | {s.model} {s.dimensions}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <span className="truncate text-[10px]">{item?.model} {item?.dimensions}</span>
+            )}
+          </td>
+          <td className="px-2 text-right border-r">
+            {isEditing ? (
+              <input type="number" value={item?.quantity || ''} onChange={e => onUpdateItem(idx, { quantity: parseFloat(e.target.value) || 0 })} className="w-full text-right px-1 py-0.5 border rounded font-mono" />
+            ) : (
+              <span className="font-mono">{item && item.quantity > 0 ? item.quantity.toLocaleString() : ''}</span>
+            )}
+          </td>
+          <td className="px-1 text-center border-r">
+            {isEditing ? (
+              <input type="text" value={item?.unit || '個'} onChange={e => onUpdateItem(idx, { unit: e.target.value })} className="w-full text-center px-1 py-0.5 border rounded font-medium" />
+            ) : (
+              <span className="font-medium">{item?.unit}</span>
+            )}
+          </td>
+          <td className="px-2 text-right border-r">
+            {isEditing ? (
+              <input type="number" value={item?.listPrice || ''} onChange={e => onUpdateItem(idx, { listPrice: parseFloat(e.target.value) || 0 })} className="w-full text-right px-1 py-0.5 border rounded font-mono text-slate-400" placeholder="0" />
+            ) : (
+              <span className="font-mono text-slate-400">{item && item.listPrice > 0 ? `¥${item.listPrice.toLocaleString()}` : ''}</span>
+            )}
+          </td>
+          <td className="px-2 text-right border-r">
+            {isEditing ? (
+              <input type="number" value={item?.appliedPrice || ''} onChange={e => onUpdateItem(idx, { appliedPrice: parseFloat(e.target.value) || 0 })} className="w-full text-right px-1 py-0.5 border rounded font-mono font-bold" placeholder="0" />
+            ) : (
+              <span className="font-mono font-bold">{item && item.appliedPrice > 0 ? `¥${item.appliedPrice.toLocaleString()}` : ''}</span>
+            )}
+          </td>
+          <td className="px-2 text-right font-mono font-bold relative">
+            {amount > 0 ? `¥${amount.toLocaleString()}` : ''}
+            {isEditing && item?.name && (
+              <button onClick={() => onDeleteItem(idx)} className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity text-rose-500 hover:bg-rose-50 rounded p-1">
+                <X size={12} />
+              </button>
+            )}
+          </td>
+          {isEditing && (
+            <td className="no-print border-l"></td>
+          )}
+        </tr>
+      )}
+    </Draggable>
+  );
+});
+
+const emptySuggestions: MaterialItem[] = [];
+
+// -----------------------------------------------------------------------
+// EstimateItemRow - used in both edit panel and print view
+// -----------------------------------------------------------------------
+const EstimateEditRow = React.memo(({
+  item,
+  globalIdx,
+  isPageStart,
+  onUpdateItem,
+  onDeleteItem,
+  onSelectSuggestion,
+  suggestions,
+  suggestionIdx,
+  suggestionType,
+  setSuggestionIdx,
+  setSuggestionType,
+  setQuery
+}: {
+  item: SlipItem | undefined,
+  globalIdx: number,
+  isPageStart?: boolean,
+  onUpdateItem: (idx: number, data: Partial<SlipItem>) => void,
+  onDeleteItem: (idx: number) => void,
+  onSelectSuggestion: (idx: number, item: MaterialItem) => void,
+  suggestions: MaterialItem[],
+  suggestionIdx: number | null,
+  suggestionType: 'name' | 'model' | null,
+  setSuggestionIdx: (idx: number | null) => void,
+  setSuggestionType: (type: 'name' | 'model' | null) => void,
+  setQuery: (q: string) => void
+}) => {
+  const draggableId = `item-${globalIdx}`;
+  return (
+    <Draggable draggableId={draggableId} index={globalIdx}>
+      {(provided, snapshot) => (
+        <tr
+          ref={provided.innerRef}
+          {...provided.draggableProps}
+          {...provided.dragHandleProps}
+          className={`border-b border-slate-200 group transition-colors cursor-grab active:cursor-grabbing ${snapshot.isDragging
+              ? 'bg-blue-100 shadow-2xl ring-2 ring-blue-500 rounded-lg opacity-90'
+              : 'hover:bg-amber-50'
+            }${isPageStart ? ' border-t-4 border-t-amber-400' : ''}`}
+          style={{ ...provided.draggableProps.style, display: 'table-row' }}
+        >
+          <td className="text-center border-r text-[9px] font-mono text-slate-400 w-12 py-1 px-1">
+            <div className="flex items-center justify-center gap-1">
+              <GripVertical size={10} className="text-slate-300" />
+              <span>{globalIdx + 1}</span>
+            </div>
+          </td>
+          <td className="px-2 border-r relative">
+            <div className="flex flex-col gap-0.5 relative">
+              <input
+                type="text"
+                value={item?.name || ''}
+                onChange={e => { onUpdateItem(globalIdx, { name: e.target.value }); setQuery(e.target.value); }}
+                onFocus={e => { setSuggestionIdx(globalIdx); setSuggestionType('name'); setQuery(e.target.value); }}
+                className="w-full text-[10px] px-1 py-0.5 border rounded focus:ring-1 focus:ring-blue-300 outline-none font-bold"
+                placeholder="品名"
+              />
+              {item?.manufacturer && <span className="text-[8px] text-slate-500 truncate">{item.manufacturer}</span>}
+              {suggestionIdx === globalIdx && suggestionType === 'name' && suggestions.length > 0 && (
+                <div className="absolute top-full left-0 z-50 bg-white border-2 border-blue-300 rounded-lg shadow-2xl w-96 max-h-64 overflow-auto">
+                  {suggestions.map((s, i) => (
+                    <div key={i} onMouseDown={e => { e.preventDefault(); onSelectSuggestion(globalIdx, s); }} className="px-3 py-2 hover:bg-blue-50 cursor-pointer border-b last:border-b-0">
+                      <div className="font-bold text-[11px]">{s.name}</div>
+                      <div className="text-[9px] text-slate-500">{s.manufacturer} / {s.model}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </td>
+          <td className="px-2 border-r relative">
+            <div className="relative">
+              <input
+                type="text"
+                value={`${item?.model || ''} ${item?.dimensions || ''}`.trim()}
+                onChange={e => { const [model, ...dims] = e.target.value.split(' '); onUpdateItem(globalIdx, { model, dimensions: dims.join(' ') }); setQuery(e.target.value); }}
+                onFocus={e => { setSuggestionIdx(globalIdx); setSuggestionType('model'); setQuery(e.target.value); }}
+                className="w-full text-[10px] px-1 py-0.5 border rounded"
+                placeholder="型式 寸法"
+              />
+              {suggestionIdx === globalIdx && suggestionType === 'model' && suggestions.length > 0 && (
+                <div className="absolute top-full left-0 z-50 bg-white border-2 border-blue-300 rounded-lg shadow-2xl w-96 max-h-64 overflow-auto mt-1">
+                  {suggestions.map(s => (
+                    <div key={s.id} onMouseDown={e => { e.preventDefault(); onSelectSuggestion(globalIdx, s); }} className="px-3 py-2 hover:bg-blue-50 cursor-pointer border-b border-slate-100 last:border-0">
+                      <div className="font-bold text-[11px]">{s.name}</div>
+                      <div className="text-[9px] text-slate-500">{s.manufacturer} / {s.model} {s.dimensions}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </td>
+          <td className="text-right border-r">
+            <input type="number" value={item?.quantity ?? ''} onChange={e => onUpdateItem(globalIdx, { quantity: parseFloat(e.target.value) || 0 })}
+              className="w-full text-[10px] px-1 py-0.5 border rounded text-right" placeholder="0" />
+          </td>
+          <td className="text-center border-r">
+            <input type="text" value={item?.unit || '個'} onChange={e => onUpdateItem(globalIdx, { unit: e.target.value })}
+              className="w-full text-[10px] px-1 py-0.5 border rounded text-center" />
+          </td>
+          <td className="text-right border-r">
+            <input type="number" value={item?.listPrice ?? ''} onChange={e => onUpdateItem(globalIdx, { listPrice: parseFloat(e.target.value) || 0 })}
+              className="w-full text-[10px] px-1 py-0.5 border rounded text-right text-slate-400" placeholder="0" />
+          </td>
+          <td className="text-right border-r">
+            <input type="number" value={item?.appliedPrice ?? ''} onChange={e => onUpdateItem(globalIdx, { appliedPrice: parseFloat(e.target.value) || 0 })}
+              className="w-full text-[10px] px-1 py-0.5 border rounded text-right font-bold text-emerald-700" placeholder="0" />
+          </td>
+          <td className="text-right border-r text-[10px] font-mono">
+            {item ? ((item.appliedPrice || 0) * (item.quantity || 0)).toLocaleString() : ''}
+          </td>
+          <td className="text-center w-8">
+            <button onMouseDown={e => { e.preventDefault(); onDeleteItem(globalIdx); }}
+              className="p-0.5 text-rose-300 hover:text-rose-500 rounded transition-colors">
+              <X size={12} />
+            </button>
+          </td>
+        </tr>
+      )}
+    </Draggable>
+  );
+});
+
+// -----------------------------------------------------------------------
+// EstimateEditPanel - Single flat Droppable for ~all~ items in edit mode
+// -----------------------------------------------------------------------
+const EstimateEditPanel = React.memo(({
+  estimate,
+  onUpdateItem,
+  onAddPage,
+  masterItems
+}: {
+  estimate: Estimate,
+  onUpdateItem: (idx: number, data: Partial<SlipItem>) => void,
+  onAddPage: () => void,
+  masterItems: MaterialItem[],
+}) => {
   const [suggestionIdx, setSuggestionIdx] = useState<number | null>(null);
   const [suggestionType, setSuggestionType] = useState<'name' | 'model' | null>(null);
   const [query, setQuery] = useState('');
@@ -167,33 +461,104 @@ const EstimateDetailPage = ({ estimate, pageNumber, isEditing, onUpdateItem, onD
     }).slice(0, 8);
   }, [query, masterItems, suggestionIdx]);
 
-  const handleSelect = (idx: number, item: MaterialItem) => {
+  const handleSelect = useCallback((idx: number, item: MaterialItem) => {
     onUpdateItem(idx, {
-      id: item.id,
-      name: item.name,
-      manufacturer: item.manufacturer,
-      model: item.model,
-      dimensions: item.dimensions,
-      unit: item.unit || '個',
-      listPrice: item.listPrice || 0,
-      appliedPrice: item.sellingPrice || 0,
-      category: item.category
+      id: item.id, name: item.name, manufacturer: item.manufacturer,
+      model: item.model, dimensions: item.dimensions, unit: item.unit || '個',
+      listPrice: item.listPrice || 0, appliedPrice: item.sellingPrice || 0, category: item.category
     });
     setSuggestionIdx(null);
     setSuggestionType(null);
     setQuery('');
-  };
+  }, [onUpdateItem]);
+
+  const handleDelete = useCallback((idx: number) => {
+    onUpdateItem(idx, { name: '', quantity: 0, appliedPrice: 0, listPrice: 0, model: '', dimensions: '', manufacturer: '' });
+  }, [onUpdateItem]);
+
+  const items = estimate.items || [];
+  const numPages = Math.max(1, Math.ceil(items.length / 16));
+
+  return (
+    <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden" style={{ width: '210mm' }}>
+      <div className="bg-slate-800 text-white px-4 py-2 flex justify-between items-center">
+        <span className="text-xs font-black tracking-widest uppercase">内訳 編集モード — 行を掴んでドラッグで並び替え</span>
+        <span className="text-[10px] text-slate-400">{items.filter(i => i.name).length} / {items.length} 行</span>
+      </div>
+      <Droppable droppableId="all-items" direction="vertical">
+        {(provided, snapshot) => (
+          <table
+            className="w-full border-collapse table-fixed text-[10px]"
+            style={{ background: snapshot.isDraggingOver ? '#f0f9ff' : 'white' }}
+          >
+            <thead className="sticky top-0 z-10 bg-slate-100 border-b-2 border-slate-900">
+              <tr>
+                <th className="py-2 px-1 w-12 border-r text-center text-slate-500">No</th>
+                <th className="py-2 px-2 text-left border-r w-[26%]">品名 / メーカー</th>
+                <th className="py-2 px-2 text-left border-r w-[20%]">型式 / 寸法</th>
+                <th className="py-2 px-2 text-right border-r w-[8%]">数量</th>
+                <th className="py-2 px-1 text-center border-r w-[5%]">単位</th>
+                <th className="py-2 px-2 text-right border-r w-[10%] text-slate-400">定価</th>
+                <th className="py-2 px-2 text-right border-r w-[10%]">売価</th>
+                <th className="py-2 px-2 text-right border-r w-[11%]">金額</th>
+                <th className="w-8"></th>
+              </tr>
+            </thead>
+            <tbody {...provided.droppableProps} ref={provided.innerRef}>
+              {items.map((item, idx) => {
+                const isPageStart = idx > 0 && idx % 16 === 0;
+                return (
+                  <EstimateEditRow
+                    key={`item-${idx}`}
+                    item={item}
+                    globalIdx={idx}
+                    isPageStart={isPageStart}
+                    onUpdateItem={onUpdateItem}
+                    onDeleteItem={handleDelete}
+                    onSelectSuggestion={handleSelect}
+                    suggestions={suggestionIdx === idx ? suggestions : emptySuggestions}
+                    suggestionIdx={suggestionIdx}
+                    suggestionType={suggestionType}
+                    setSuggestionIdx={setSuggestionIdx}
+                    setSuggestionType={setSuggestionType}
+                    setQuery={setQuery}
+                  />
+                );
+              })}
+              {provided.placeholder}
+            </tbody>
+          </table>
+        )}
+      </Droppable>
+      <div className="p-3 border-t border-slate-200 bg-slate-50 flex justify-center">
+        <button onClick={onAddPage}
+          className="bg-amber-500 text-white px-6 py-2 rounded-xl text-xs font-black flex items-center gap-2 shadow hover:bg-amber-600 transition-all active:scale-95">
+          <Plus size={16} /> ページを追加 (16行)
+        </button>
+      </div>
+    </div>
+  );
+});
+
+// -----------------------------------------------------------------------
+// EstimateDetailPage - print/view only, no DnD
+// -----------------------------------------------------------------------
+const EstimateDetailPage = React.memo(({ estimate, pageNumber, settings }: {
+  estimate: Estimate,
+  pageNumber: number,
+  settings: AppSettings | null,
+}) => {
+  const info = settings || DEFAULT_COMPANY_INFO;
+  const pageItems = (estimate.items || []).slice((pageNumber - 1) * 16, pageNumber * 16);
+  const paddedItems = [...Array(16)].map((_, i) => pageItems[i]);
 
   return (
     <div className="bg-white p-10 print:p-[15mm] text-slate-900 flex flex-col justify-between h-full w-full box-border min-h-[280mm]">
       <div className="w-full">
-        {/* Simplified header for detail pages */}
         <div className="flex justify-between items-center border-b-2 border-slate-300 pb-1 mb-3 print:mb-2">
           <h2 className="text-lg font-bold">内訳 (Page {pageNumber})</h2>
           <div className="text-xs text-slate-500">{estimate.customerName} 様 - {estimate.constructionName || '一般'}</div>
         </div>
-
-        {/* Items table only */}
         <table className="w-full border-collapse table-fixed text-[10px] border-2 border-slate-900" style={{ marginBottom: '8px' }}>
           <thead>
             <tr className="bg-slate-100 border-y-2 border-slate-900">
@@ -208,554 +573,34 @@ const EstimateDetailPage = ({ estimate, pageNumber, isEditing, onUpdateItem, onD
             </tr>
           </thead>
           <tbody>
-            {Array.from({ length: 16 }).map((_, idx) => {
-              const item = estimate.items?.[idx];
-              const amount = item ? (item.appliedPrice || 0) * (item.quantity || 0) : 0;
-
-              if (!item && !isEditing) {
-                return (
-                  <tr key={`empty-${idx}`} className="border-b h-[10.5mm] print:h-[9mm] border-slate-200">
-                    <td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td></td>
-                  </tr>
-                );
-              }
-
-              return (
-                <tr key={idx} className="border-b h-[10.5mm] print:h-[9mm] border-slate-200 hover:bg-slate-50 transition-colors group">
-                  <td className="text-center border-r text-[9px] font-mono">{idx + 1}</td>
-                  <td className="px-2 border-r relative">
-                    {isEditing ? (
-                      <div className="flex flex-col gap-0.5 relative">
-                        <input
-                          type="text"
-                          value={item?.name || ''}
-                          onChange={e => { onUpdateItem(idx, { name: e.target.value }); setQuery(e.target.value); }}
-                          onFocus={e => { setSuggestionIdx(idx); setSuggestionType('name'); setQuery(e.target.value); }}
-                          className="w-full text-[10px] px-1 py-0.5 border rounded focus:ring-1 focus:ring-blue-300 outline-none font-bold"
-                          placeholder="品名"
-                        />
-                        {item?.manufacturer && <span className="text-[8px] text-slate-500 truncate">{item.manufacturer}</span>}
-                        {suggestionIdx === idx && suggestionType === 'name' && suggestions.length > 0 && (
-                          <div className="absolute top-full left-0 z-50 bg-white border-2 border-blue-300 rounded-lg shadow-2xl w-96 max-h-64 overflow-auto">
-                            {suggestions.map((s, i) => (
-                              <div key={i} onClick={() => handleSelect(idx, s)} className="px-3 py-2 hover:bg-blue-50 cursor-pointer border-b last:border-b-0">
-                                <div className="font-bold text-[11px]">{s.name}</div>
-                                <div className="text-[9px] text-slate-500">{s.manufacturer} / {s.model}</div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex flex-col">
-                        <span className="font-bold truncate text-[10px]">{item?.name}</span>
-                        {item?.manufacturer && <span className="text-[8px] text-slate-500 truncate">{item.manufacturer}</span>}
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-2 border-r relative font-medium">
-                    {isEditing ? (
-                      <div className="relative">
-                        <input
-                          type="text"
-                          value={`${item?.model || ''} ${item?.dimensions || ''}`.trim()}
-                          onChange={e => { const [model, ...dims] = e.target.value.split(' '); onUpdateItem(idx, { model, dimensions: dims.join(' ') }); setQuery(e.target.value); }}
-                          onFocus={e => { setSuggestionIdx(idx); setSuggestionType('model'); setQuery(e.target.value); }}
-                          className="w-full text-[10px] px-1 py-0.5 border rounded"
-                          placeholder="型式 寸法"
-                        />
-                        {suggestionIdx === idx && suggestionType === 'model' && suggestions.length > 0 && (
-                          <div className="absolute top-full left-0 z-50 bg-white border-2 border-blue-300 rounded-lg shadow-2xl w-96 max-h-64 overflow-auto mt-1">
-                            {suggestions.map(s => (
-                              <div key={s.id} onClick={() => handleSelect(idx, s)} className="px-3 py-2 hover:bg-blue-50 cursor-pointer border-b border-slate-100 last:border-0">
-                                <div className="font-bold text-xs text-slate-800">{s.name}</div>
-                                <div className="text-[10px] text-slate-500 mt-0.5">{s.manufacturer} | {s.model} {s.dimensions}</div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="truncate text-[10px]">{item?.model} {item?.dimensions}</span>
-                    )}
-                  </td>
-                  <td className="px-2 text-right border-r">
-                    {isEditing ? (
-                      <input type="number" value={item?.quantity || ''} onChange={e => onUpdateItem(idx, { quantity: parseFloat(e.target.value) || 0 })} className="w-full text-right px-1 py-0.5 border rounded font-mono" />
-                    ) : (
-                      <span className="font-mono">{item && item.quantity > 0 ? item.quantity.toLocaleString() : ''}</span>
-                    )}
-                  </td>
-                  <td className="px-1 text-center border-r">
-                    {isEditing ? (
-                      <input type="text" value={item?.unit || '個'} onChange={e => onUpdateItem(idx, { unit: e.target.value })} className="w-full text-center px-1 py-0.5 border rounded font-medium" />
-                    ) : (
-                      <span className="font-medium">{item?.unit}</span>
-                    )}
-                  </td>
-                  <td className="px-2 text-right border-r">
-                    {isEditing ? (
-                      <input type="number" value={item?.listPrice || ''} onChange={e => onUpdateItem(idx, { listPrice: parseFloat(e.target.value) || 0 })} className="w-full text-right px-1 py-0.5 border rounded font-mono text-slate-400" placeholder="0" />
-                    ) : (
-                      <span className="font-mono text-slate-400">{item && item.listPrice > 0 ? `¥${item.listPrice.toLocaleString()}` : ''}</span>
-                    )}
-                  </td>
-                  <td className="px-2 text-right border-r">
-                    {isEditing ? (
-                      <input type="number" value={item?.appliedPrice || ''} onChange={e => onUpdateItem(idx, { appliedPrice: parseFloat(e.target.value) || 0 })} className="w-full text-right px-1 py-0.5 border rounded font-mono font-bold" placeholder="0" />
-                    ) : (
-                      <span className="font-mono font-bold">{item && item.appliedPrice > 0 ? `¥${item.appliedPrice.toLocaleString()}` : ''}</span>
-                    )}
-                  </td>
-                  <td className="px-2 text-right font-mono font-bold relative">
-                    {amount > 0 ? `¥${amount.toLocaleString()}` : ''}
-                    {isEditing && item?.name && (
-                      <button onClick={() => onDeleteItem(idx)} className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity text-rose-500 hover:bg-rose-50 rounded p-1">
-                        <X size={12} />
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
+            {paddedItems.map((item, idx) => (
+              <tr key={item?.id || `view-${pageNumber}-${idx}`} className="border-b h-[10.5mm] print:h-[9mm] border-slate-200">
+                <td className="text-center border-r text-[9px] font-mono">{idx + 1}</td>
+                <td className="px-2 border-r">
+                  <div className="flex flex-col">
+                    <span className="font-bold truncate text-[10px]">{item?.name}</span>
+                    {item?.manufacturer && <span className="text-[8px] text-slate-500 truncate">{item.manufacturer}</span>}
+                  </div>
+                </td>
+                <td className="px-2 border-r text-[10px] font-medium">{item ? `${item.model || ''} ${item.dimensions || ''}`.trim() : ''}</td>
+                <td className="text-right px-2 border-r text-[10px]">{item?.quantity || ''}</td>
+                <td className="text-center border-r text-[10px]">{item?.unit || ''}</td>
+                <td className="text-right px-2 border-r text-[10px] text-slate-400 font-mono">{item?.listPrice ? item.listPrice.toLocaleString() : ''}</td>
+                <td className="text-right px-2 border-r text-[10px] font-mono font-bold">{item?.appliedPrice ? item.appliedPrice.toLocaleString() : ''}</td>
+                <td className="text-right px-2 text-[10px] font-mono">{item ? ((item.appliedPrice || 0) * (item.quantity || 0)).toLocaleString() : ''}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
       <div className="text-[8px] text-slate-400 flex justify-between font-mono italic mt-4 shrink-0">
-        <span>ESTIMATE -DETAIL PAGE / TAX NOT INCLUDED IN ITEM PRICE</span>
+        <span>ESTIMATE - DETAIL PAGE / TAX NOT INCLUDED IN ITEM PRICE</span>
         <span>DAIEI KANKI Co., Ltd.</span>
       </div>
     </div>
   );
-};
+});
 
-const EstimatePage = ({ estimate, isEditing, onUpdateItem, onDeleteItem, onUpdateMeta, masterItems, pageNumber = 1, cumulativeTotal = 0, isCoverPage = false, pageTotals = [], settings }: {
-  estimate: Estimate,
-  isEditing: boolean,
-  onUpdateItem: (idx: number, data: Partial<SlipItem>) => void,
-  onDeleteItem: (idx: number) => void,
-  onUpdateMeta: (data: Partial<Estimate>) => void,
-  masterItems: MaterialItem[],
-  pageNumber?: number,
-  cumulativeTotal?: number,
-  isCoverPage?: boolean,
-  pageTotals?: { page: number; total: number }[],
-  settings: AppSettings | null
-}) => {
-  const info = settings || DEFAULT_COMPANY_INFO;
-  const [suggestionIdx, setSuggestionIdx] = useState<number | null>(null);
-  const [suggestionType, setSuggestionType] = useState<'name' | 'model' | null>(null);
-  const [query, setQuery] = useState('');
-
-  const suggestions = useMemo(() => {
-    if (!query.trim() || suggestionIdx === null) return [];
-    const keywords = query.toLowerCase().split(/[\s\u3000]+/).filter(k => k.length > 0);
-    return masterItems.filter(i => {
-      const text = `${i.name} ${i.model || ''} ${i.dimensions || ''}`.toLowerCase();
-      return keywords.every(k => text.includes(k));
-    }).slice(0, 8);
-  }, [query, masterItems, suggestionIdx]);
-
-  const handleSelect = (idx: number, item: MaterialItem) => {
-    onUpdateItem(idx, {
-      id: item.id,
-      name: item.name,
-      manufacturer: item.manufacturer,
-      model: item.model,
-      dimensions: item.dimensions,
-      unit: item.unit || '個',
-      listPrice: item.listPrice || 0,
-      appliedPrice: item.sellingPrice || 0,
-      category: item.category
-    });
-    setSuggestionIdx(null);
-    setSuggestionType(null);
-    setQuery('');
-  };
-
-  // Cover Page (Page 1)
-  if (isCoverPage) {
-    return (
-      <div className="bg-white p-10 text-slate-900 flex flex-col justify-between h-full w-full box-border min-h-[280mm] print:p-0 print:min-h-0 print:h-auto">
-        <div className="w-full">
-          <div className="flex justify-between items-end border-b-4 border-slate-900 pb-2 mb-6 print:mb-2 print:pb-1">
-            <h1 className="text-3xl font-serif font-bold tracking-[0.5em]">御見積書</h1>
-            <div className="text-right text-xs font-mono">
-              <p>No. {estimate.slipNumber || 'EST-PENDING'}</p>
-              <div className="flex items-center justify-end gap-1">
-                <span>日付:</span>
-                {isEditing ? (
-                  <input type="date" value={estimate.date} onChange={e => onUpdateMeta({ date: e.target.value })} className="border rounded px-1" />
-                ) : (
-                  <span>{estimate.date}</span>
-                )}
-              </div>
-              <div className="flex items-center justify-end gap-1 text-blue-600 font-bold">
-                <span>有効期限:</span>
-                {isEditing ? (
-                  <input type="date" value={estimate.validUntil} onChange={e => onUpdateMeta({ validUntil: e.target.value })} className="border rounded px-1" />
-                ) : (
-                  <span>{estimate.validUntil}</span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex justify-between mb-6 items-start print:mb-2">
-            <div className="w-[60%]">
-              <div className="flex items-center gap-2 mb-4">
-                {isEditing ? (
-                  <input type="text" value={estimate.customerName} onChange={e => onUpdateMeta({ customerName: e.target.value })} className="text-2xl font-bold border-b-2 border-slate-300 focus:border-blue-500 outline-none w-full" placeholder="顧客名を入力" />
-                ) : (
-                  <h2 className="text-2xl font-bold underline underline-offset-8 decoration-slate-300">{estimate.customerName} 御中</h2>
-                )}
-              </div>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="bg-slate-800 text-white text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider shrink-0">現場</span>
-                {isEditing ? (
-                  <input type="text" value={estimate.constructionName || ''} onChange={e => onUpdateMeta({ constructionName: e.target.value })} className="text-lg font-bold border-b border-slate-200 outline-none w-full" placeholder="現場名を入力" />
-                ) : (
-                  <span className="text-lg font-bold">{estimate.constructionName || '一般・共通'}</span>
-                )}
-              </div>
-              <p className="text-[10px] mt-4 text-slate-500 font-bold tracking-tight border-l-4 border-slate-200 pl-3 leading-relaxed">下記の通り、御見積り申し上げます。（表示価格は全て税抜です）</p>
-            </div>
-            <div className="w-[40%] text-right text-[10px] flex flex-col items-end gap-3">
-              <div className="text-right leading-relaxed">
-                <h3 className="text-sm font-bold mb-1">{info.companyName}</h3>
-                <p>{info.postalCode} {info.address}</p>
-                <p className="mt-1 font-bold">TEL: {info.phone}</p>
-                <div className="flex justify-end gap-1 mt-1 font-bold">
-                  <span>担当:</span>
-                  {isEditing ? (
-                    <input type="text" value={estimate.receivingPerson || ''} onChange={e => onUpdateMeta({ receivingPerson: e.target.value })} className="border rounded px-1 w-24" placeholder="担当者" />
-                  ) : (
-                    <span>{estimate.receivingPerson || '本部'}</span>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Page Totals Summary Table */}
-          <table className="w-full border-collapse table-fixed text-[10px] border-2 border-slate-900 mb-4" style={{ marginBottom: '8px' }}>
-            <thead>
-              <tr className="bg-slate-100 border-y-2 border-slate-900">
-                <th className="py-2 px-3 text-left border-r w-[70%]">ページ</th>
-                <th className="py-2 px-3 text-right w-[30%]">金額 (税抜)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pageTotals.map((pt, idx) => (
-                <tr key={idx} className="border-b border-slate-200" style={{ height: '9mm' }}>
-                  <td className="px-3 border-r font-bold">P{pt.page} - 内訳</td>
-                  <td className="px-3 text-right font-mono font-bold">¥{pt.total.toLocaleString()}</td>
-                </tr>
-              ))}
-              {Array.from({ length: Math.max(0, 16 - pageTotals.length) }).map((_, i) => (
-                <tr key={`empty-${i}`} className="border-b border-slate-200" style={{ height: '9mm' }}>
-                  <td className="border-r"></td>
-                  <td></td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="bg-slate-50 font-bold border-t-2 border-slate-900">
-                <td className="py-2.5 px-3 text-right border-r text-[10px] uppercase">小計 (税抜)</td>
-                <td className="py-2.5 px-3 text-right font-mono text-base">¥{(estimate.totalAmount || 0).toLocaleString()}</td>
-              </tr>
-              <tr className="bg-slate-50 font-bold">
-                <td className="py-2.5 px-3 text-right border-r text-[10px] uppercase">消費税 (10%)</td>
-                <td className="py-2.5 px-3 text-right font-mono text-base">¥{(estimate.taxAmount || 0).toLocaleString()}</td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-        <div className="text-[8px] text-slate-400 flex justify-between font-mono italic mt-4 shrink-0">
-          <span>ESTIMATE - COVER PAGE / TAX NOT INCLUDED IN ITEM PRICE</span>
-          <span>DAIEI KANKI Co., Ltd.</span>
-        </div>
-      </div>
-    );
-  }
-
-  // Detail Page (Page 2+)
-  return (
-    <div className="bg-white p-10 text-slate-900 flex flex-col justify-between h-full w-full box-border min-h-[280mm] print:p-0 print:min-h-0 print:h-auto">
-      <div className="w-full">
-        {/* Simplified header for detail pages */}
-        <div className="flex justify-between items-center border-b-2 border-slate-300 pb-1 mb-3 print:mb-2">
-          <h2 className="text-lg font-bold">内訳 (Page {pageNumber})</h2>
-          <div className="text-xs text-slate-500">{estimate.customerName} 様 - {estimate.constructionName || '一般'}</div>
-        </div>
-
-        {/* Items table only */}
-        <div className="flex justify-between items-end border-b-4 border-slate-900 pb-2 mb-6 print:mb-2 print:pb-1">
-          <h1 className="text-3xl font-serif font-bold tracking-[0.5em]">御見積書</h1>
-          <div className="text-right text-xs font-mono">
-            <p>No. {estimate.slipNumber || 'EST-PENDING'}</p>
-            <div className="flex items-center justify-end gap-1">
-              <span>日付:</span>
-              {isEditing ? (
-                <input type="date" value={estimate.date} onChange={e => onUpdateMeta({ date: e.target.value })} className="border rounded px-1" />
-              ) : (
-                <span>{estimate.date}</span>
-              )}
-            </div>
-            <div className="flex items-center justify-end gap-1 text-blue-600 font-bold">
-              <span>有効期限:</span>
-              {isEditing ? (
-                <input type="date" value={estimate.validUntil} onChange={e => onUpdateMeta({ validUntil: e.target.value })} className="border rounded px-1" />
-              ) : (
-                <span>{estimate.validUntil}</span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex justify-between mb-6 items-start print:mb-2">
-          <div className="w-[60%]">
-            <div className="flex items-center gap-2 mb-4">
-              {isEditing ? (
-                <input type="text" value={estimate.customerName} onChange={e => onUpdateMeta({ customerName: e.target.value })} className="text-2xl font-bold border-b-2 border-slate-300 focus:border-blue-500 outline-none w-full" placeholder="顧客名を入力" />
-              ) : (
-                <h2 className="text-2xl font-bold underline underline-offset-8 decoration-slate-300">{estimate.customerName} 御中</h2>
-              )}
-            </div>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="bg-slate-800 text-white text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider shrink-0">現場</span>
-              {isEditing ? (
-                <input type="text" value={estimate.constructionName || ''} onChange={e => onUpdateMeta({ constructionName: e.target.value })} className="text-lg font-bold border-b border-slate-200 outline-none w-full" placeholder="現場名を入力" />
-              ) : (
-                <span className="text-lg font-bold">{estimate.constructionName || '一般・共通'}</span>
-              )}
-            </div>
-            <p className="text-[10px] mt-4 text-slate-500 font-bold tracking-tight border-l-4 border-slate-200 pl-3 leading-relaxed">下記の通り、御見積り申し上げます。（表示価格は全て税抜です）</p>
-          </div>
-          <div className="w-[40%] text-right text-[10px] flex flex-col items-end gap-3">
-            <div className="text-right leading-relaxed">
-              <h3 className="text-sm font-bold mb-1">{info.companyName}</h3>
-              <p>{info.postalCode} {info.address}</p>
-              <p className="mt-1 font-bold">TEL: {info.phone}</p>
-              <div className="flex justify-end gap-1 mt-1 font-bold">
-                <span>担当:</span>
-                {isEditing ? (
-                  <input type="text" value={estimate.receivingPerson || ''} onChange={e => onUpdateMeta({ receivingPerson: e.target.value })} className="border rounded px-1 w-24 text-right" />
-                ) : (
-                  <span>{estimate.receivingPerson || '本部'}</span>
-                )}
-              </div>
-            </div>
-            <table className="border-collapse border border-slate-400 text-[8px] w-32 text-center h-12 shrink-0">
-              <tbody>
-                <tr>
-                  <td className="border border-slate-400 py-0.5 w-1/3 font-bold bg-slate-50 text-[7px]">承認</td>
-                  <td className="border border-slate-400 py-0.5 w-1/3 font-bold bg-slate-50 text-[7px]">検印</td>
-                  <td className="border border-slate-400 py-0.5 w-1/3 font-bold bg-slate-50 text-[7px]">担当</td>
-                </tr>
-                <tr className="h-10">
-                  <td className="border border-slate-400"></td>
-                  <td className="border border-slate-400"></td>
-                  <td className="border border-slate-400"></td>
-                </tr>
-              </tbody>
-            </table>
-
-            <div className="mt-2 border-2 border-slate-800 p-2 bg-slate-50 inline-block min-w-[220px]">
-              <div className="text-center font-bold text-[8px] border-b border-slate-300 pb-1 mb-1 text-slate-500 uppercase tracking-widest">御見積合計 (税込)</div>
-              <div className="text-2xl font-mono font-black text-center whitespace-nowrap px-2">¥{(estimate.grandTotal || 0).toLocaleString()}-</div>
-            </div>
-          </div>
-        </div>
-
-        <table className="w-full border-collapse table-fixed text-[10px] border-l-2 border-r-2 border-b-2 border-slate-900">
-          <thead>
-            <tr className="bg-slate-100 border-y-2 border-slate-900">
-              <th className="py-2 px-1 w-[4%] border-r text-center">No</th>
-              <th className="py-2 px-2 text-left border-r w-[26%]">品名 / メーカー</th>
-              <th className="py-2 px-2 text-left border-r w-[22%]">型式 / 寸法</th>
-              <th className="py-2 px-2 text-right border-r w-[8%]">数量</th>
-              <th className="py-2 px-1 text-center border-r w-[6%]">単位</th>
-              <th className="py-2 px-2 text-right border-r w-[11%] text-slate-400">定価(抜)</th>
-              <th className="py-2 px-2 text-right border-r w-[11%]">売価(抜)</th>
-              <th className="py-2 px-2 text-right w-[12%]">金額</th>
-              {isEditing && <th className="w-8 no-print border-l"></th>}
-            </tr>
-          </thead>
-          <tbody>
-            {Array.from({ length: 16 }).map((_, idx) => {
-              const item = estimate.items?.[idx];
-              const amount = item ? (item.appliedPrice || 0) * (item.quantity || 0) : 0;
-
-              if (!item && !isEditing) {
-                return (
-                  <tr key={`empty-${idx}`} className="border-b h-[10.5mm] print:h-[9mm] border-slate-200">
-                    <td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td className="border-r"></td><td></td>
-                  </tr>
-                );
-              }
-
-              const displayItem = item || { name: '', model: '', dimensions: '', quantity: 0, unit: '個', listPrice: 0, appliedPrice: 0, manufacturer: '' };
-
-              return (
-                <tr key={idx} className="border-b h-[10.5mm] print:h-[9mm] border-slate-200 group">
-                  <td className="text-center border-r text-[9px] font-mono">{idx + 1}</td>
-                  <td className="px-2 border-r relative">
-                    {isEditing ? (
-                      <div className="flex flex-col">
-                        <input
-                          type="text"
-                          value={displayItem.name}
-                          onChange={e => {
-                            onUpdateItem(idx, { name: e.target.value });
-                            setQuery(e.target.value);
-                            setSuggestionIdx(idx);
-                            setSuggestionType('name');
-                          }}
-                          onFocus={() => { setSuggestionIdx(idx); setSuggestionType('name'); setQuery(displayItem.name); }}
-                          className="w-full bg-blue-50 font-bold outline-none"
-                          placeholder="品名"
-                        />
-                        <input
-                          type="text"
-                          value={displayItem.manufacturer || ''}
-                          onChange={e => onUpdateItem(idx, { manufacturer: e.target.value })}
-                          className="w-full bg-blue-50 outline-none text-[8px]"
-                          placeholder="メーカー"
-                        />
-                        {suggestionIdx === idx && suggestionType === 'name' && suggestions.length > 0 && (
-                          <div className="absolute left-0 top-full mt-1 w-[200%] max-w-sm bg-white shadow-2xl border-2 border-blue-500 rounded-xl z-[200] overflow-hidden animate-in fade-in slide-in-from-top-2">
-                            {suggestions.map(s => (
-                              <button key={s.id} onClick={() => handleSelect(idx, s)} className="w-full text-left p-3 hover:bg-blue-50 border-b flex flex-col gap-1">
-                                <span className="font-black text-xs text-slate-900">{s.name}</span>
-                                <span className="text-[9px] text-slate-500 font-mono">{s.model} {s.dimensions}</span>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="flex flex-col">
-                        <span className="font-bold">{displayItem.name}</span>
-                        {displayItem.manufacturer && <span className="text-[8px] text-slate-500 font-normal leading-tight">{displayItem.manufacturer}</span>}
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-2 border-r relative font-medium">
-                    {isEditing ? (
-                      <div className="flex flex-col">
-                        <input
-                          type="text"
-                          value={displayItem.model || ''}
-                          onChange={e => {
-                            onUpdateItem(idx, { model: e.target.value });
-                            setQuery(e.target.value);
-                            setSuggestionIdx(idx);
-                            setSuggestionType('model');
-                          }}
-                          onFocus={() => { setSuggestionIdx(idx); setSuggestionType('model'); setQuery(displayItem.model || ''); }}
-                          className="bg-blue-50 outline-none text-[8px]"
-                          placeholder="型式"
-                        />
-                        <input
-                          type="text"
-                          value={displayItem.dimensions || ''}
-                          onChange={e => onUpdateItem(idx, { dimensions: e.target.value })}
-                          className="bg-blue-50 outline-none text-[8px]"
-                          placeholder="寸法"
-                        />
-                        {suggestionIdx === idx && suggestionType === 'model' && suggestions.length > 0 && (
-                          <div className="absolute left-0 top-full mt-1 w-[200%] max-sm bg-white shadow-2xl border-2 border-blue-500 rounded-xl z-[200] overflow-hidden animate-in fade-in slide-in-from-top-2">
-                            {suggestions.map(s => (
-                              <button key={s.id} onClick={() => handleSelect(idx, s)} className="w-full text-left p-3 hover:bg-blue-50 border-b flex flex-col gap-1">
-                                <span className="font-black text-xs text-slate-900">{s.name}</span>
-                                <span className="text-[9px] text-slate-500 font-mono">{s.model} {s.dimensions}</span>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <span className="truncate">{displayItem.model} {displayItem.dimensions}</span>
-                    )}
-                  </td>
-                  <td className="px-2 text-right border-r font-mono">
-                    {isEditing ? (
-                      <input type="number" value={displayItem.quantity || ''} onChange={e => onUpdateItem(idx, { quantity: Number(e.target.value) })} className="w-full text-right bg-blue-50 font-black outline-none" />
-                    ) : (
-                      <span>{displayItem.quantity > 0 ? displayItem.quantity.toLocaleString() : ''}</span>
-                    )}
-                  </td>
-                  <td className="px-1 text-center border-r font-medium">
-                    {isEditing ? (
-                      <input type="text" value={displayItem.unit} onChange={e => onUpdateItem(idx, { unit: e.target.value })} className="w-full text-center bg-blue-50 outline-none" />
-                    ) : (
-                      <span>{displayItem.unit}</span>
-                    )}
-                  </td>
-                  <td className="px-2 text-right border-r font-mono text-slate-400">
-                    {isEditing ? (
-                      <input type="number" value={displayItem.listPrice || ''} onChange={e => onUpdateItem(idx, { listPrice: Number(e.target.value) })} className="w-full text-right bg-slate-50 font-bold outline-none" />
-                    ) : (
-                      <span>{displayItem.listPrice > 0 ? `¥${displayItem.listPrice.toLocaleString()}` : ''}</span>
-                    )}
-                  </td>
-                  <td className="px-2 text-right border-r font-mono">
-                    {isEditing ? (
-                      <input type="number" value={displayItem.appliedPrice || ''} onChange={e => onUpdateItem(idx, { appliedPrice: Number(e.target.value) })} className="w-full text-right bg-blue-50 font-black outline-none" />
-                    ) : (
-                      <span className="font-bold">{displayItem.appliedPrice > 0 ? `¥${displayItem.appliedPrice.toLocaleString()}` : ''}</span>
-                    )}
-                  </td>
-                  <td className="px-2 text-right font-mono font-bold">{amount > 0 ? `¥${amount.toLocaleString()}` : ''}</td>
-                  {isEditing && (
-                    <td className="p-1 no-print border-l text-center">
-                      <button onClick={() => onDeleteItem(idx)} className="text-rose-500 hover:scale-110 transition-transform"><Trash2 size={14} /></button>
-                    </td>
-                  )}
-                </tr>
-              );
-            })
-            }
-          </tbody>
-          <tfoot>
-            {pageNumber === 1 ? (
-              <>
-                <tr className="bg-slate-50 font-bold border-t-2 border-slate-900">
-                  <td colSpan={7} className="py-2.5 px-3 text-right border-r text-[10px] uppercase">小計 (税抜)</td>
-                  <td className="py-2.5 px-2 text-right font-mono text-base">¥{(estimate.totalAmount || 0).toLocaleString()}</td>
-                  {isEditing && <td></td>}
-                </tr>
-                <tr className="bg-slate-50 font-bold">
-                  <td colSpan={7} className="py-2.5 px-3 text-right border-r text-[10px] uppercase">消費税 (10%)</td>
-                  <td className="py-2.5 px-2 text-right font-mono text-base">¥{(estimate.taxAmount || 0).toLocaleString()}</td>
-                  {isEditing && <td></td>}
-                </tr>
-              </>
-            ) : (
-              <>
-                <tr className="bg-slate-50 font-bold border-t-2 border-slate-900">
-                  <td colSpan={7} className="py-2.5 px-3 text-right border-r text-[10px] uppercase">当頁小計 (税抜)</td>
-                  <td className="py-2.5 px-2 text-right font-mono text-base">¥{(estimate.items || []).reduce((sum, item) => sum + ((item.appliedPrice || 0) * (item.quantity || 0)), 0).toLocaleString()}</td>
-                  {isEditing && <td></td>}
-                </tr>
-                <tr className="bg-slate-50 font-bold">
-                  <td colSpan={7} className="py-2.5 px-3 text-right border-r text-[10px] uppercase">前頁累計 (税抜)</td>
-                  <td className="py-2.5 px-2 text-right font-mono text-base">¥{cumulativeTotal.toLocaleString()}</td>
-                  {isEditing && <td></td>}
-                </tr>
-              </>
-            )}
-          </tfoot>
-        </table>
-      </div>
-      <div className="text-[8px] text-slate-400 flex justify-between font-mono italic mt-4 shrink-0">
-        <span>ESTIMATE - BREAKDOWN LIST / TAX NOT INCLUDED IN ITEM PRICE</span>
-        <span>DAIEI KANKI Co., Ltd.</span>
-      </div>
-    </div>
-  );
-};
 
 export const EstimateManager: React.FC<EstimateManagerProps> = ({ onClose, onConvertToSlip, masterItems, settings, customers }) => {
   const [estimates, setEstimates] = useState<Estimate[]>([]);
@@ -800,13 +645,13 @@ export const EstimateManager: React.FC<EstimateManagerProps> = ({ onClose, onCon
     return estimates.filter(e => e.customerName.toLowerCase().includes(q) || (e.constructionName || '').toLowerCase().includes(q));
   }, [estimates, searchQuery]);
 
-  const handleUpdateMeta = (data: Partial<Estimate>) => {
-    if (!selectedEstimate) return;
-    recalculate(selectedEstimate.items, data);
-  };
+  const recalculate = useCallback((items: SlipItem[], meta: Partial<Estimate>) => {
+    const total = items.reduce((s, i) => s + ((i.appliedPrice || 0) * (i.quantity || 0)), 0);
+    setSelectedEstimate(prev => prev ? { ...prev, ...meta, items, totalAmount: total, taxAmount: Math.floor(total * 0.1), grandTotal: Math.floor(total * 1.1) } : null);
+  }, []);
 
-  const createEmptyItem = (idx: number): SlipItem => ({
-    id: `man-${Date.now()}-${idx}`,
+  const createEmptyItem = useCallback((idx: number): SlipItem => ({
+    id: generateId(),
     name: '',
     category: '消耗品・雑材',
     model: '',
@@ -819,16 +664,43 @@ export const EstimateManager: React.FC<EstimateManagerProps> = ({ onClose, onCon
     sellingPrice: 0,
     location: '手入力',
     updatedAt: Date.now()
-  });
+  }), []);
 
-  const padItems = (items: SlipItem[]): SlipItem[] => {
+  const padItems = useCallback((items: SlipItem[]): SlipItem[] => {
     const list = [...(items || [])];
     const targetLength = Math.max(16, Math.ceil(list.length / 16) * 16);
     while (list.length < targetLength) {
       list.push(createEmptyItem(list.length));
     }
     return list;
-  };
+  }, [createEmptyItem]);
+
+  const handleUpdateMeta = useCallback((data: Partial<Estimate>) => {
+    if (!selectedEstimate) return;
+    recalculate(selectedEstimate.items, data);
+  }, [selectedEstimate, recalculate]);
+
+  const handleManualAdd = useCallback(() => {
+    const newItem: SlipItem = {
+      id: generateId(),
+      name: '',
+      category: '消耗品・雑材',
+      model: '',
+      dimensions: '',
+      quantity: 0,
+      unit: '個',
+      appliedPrice: 0,
+      costPrice: 0,
+      listPrice: 0,
+      sellingPrice: 0,
+      location: '手入力',
+      updatedAt: Date.now()
+    };
+    if (selectedEstimate) {
+      const newItems = [...selectedEstimate.items.filter(i => i.name.trim() !== ''), newItem];
+      recalculate(padItems(newItems), {});
+    }
+  }, [selectedEstimate, recalculate, padItems]);
 
   const handleNewEstimate = async () => {
     const today = new Date().toISOString().slice(0, 10);
@@ -858,18 +730,27 @@ export const EstimateManager: React.FC<EstimateManagerProps> = ({ onClose, onCon
     }
   };
 
-  const handleUpdateItem = (idx: number, data: Partial<SlipItem>) => {
+  const handleUpdateItem = useCallback((idx: number, data: Partial<SlipItem>) => {
     if (!selectedEstimate) return;
     const newItems = [...selectedEstimate.items];
+    while (newItems.length <= idx) {
+      newItems.push(createEmptyItem(newItems.length));
+    }
     newItems[idx] = { ...newItems[idx], ...data };
+    if (!newItems[idx].id) newItems[idx].id = generateId(); // Safety net in case id got lost
+
     recalculate(newItems, {});
-  };
+  }, [selectedEstimate, recalculate, createEmptyItem]);
 
-  const recalculate = (items: SlipItem[], meta: Partial<Estimate>) => {
-    const total = items.reduce((s, i) => s + ((i.appliedPrice || 0) * (i.quantity || 0)), 0);
-    setSelectedEstimate(prev => prev ? { ...prev, ...meta, items, totalAmount: total, taxAmount: Math.floor(total * 0.1), grandTotal: Math.floor(total * 1.1) } : null);
-  };
+  const handleDragEnd = useCallback((result: DropResult) => {
+    if (!result.destination || !selectedEstimate) return;
+    if (result.source.index === result.destination.index) return;
 
+    const items = Array.from(selectedEstimate.items);
+    const [moved] = items.splice(result.source.index, 1);
+    items.splice(result.destination.index, 0, moved);
+    recalculate(items, {});
+  }, [selectedEstimate, recalculate]);
   const handleSave = async () => {
     if (!selectedEstimate) return;
     if (!selectedEstimate.id) {
@@ -922,7 +803,6 @@ export const EstimateManager: React.FC<EstimateManagerProps> = ({ onClose, onCon
                 width: 210mm !important;
                 min-height: 297mm !important;
               }
-              /* Override conflicting #print-target style */
               #print-target > div,
               .estimate-print-page > div,
               .estimate-print-page > * {
@@ -947,7 +827,12 @@ export const EstimateManager: React.FC<EstimateManagerProps> = ({ onClose, onCon
             </div>
             <div className="flex-1 overflow-y-auto p-2 sm:p-4 space-y-2 sm:space-y-3">
               {filteredEstimates.map(e => (
-                <div key={e.id} onClick={() => { setSelectedEstimate({ ...e, items: padItems(e.items) }); setIsEditing(false); }} className={`p-2.5 sm:p-4 rounded-xl sm:rounded-2xl border transition-all cursor-pointer group ${selectedEstimate?.id === e.id ? 'bg-amber-50 border-amber-300 shadow-md' : 'bg-white hover:border-amber-200 hover:shadow-sm'}`}>
+                <div key={e.id} onClick={() => {
+                  if (selectedEstimate?.id !== e.id) {
+                    setSelectedEstimate({ ...e, items: padItems(e.items) });
+                    setIsEditing(false);
+                  }
+                }} className={`p-2.5 sm:p-4 rounded-xl sm:rounded-2xl border transition-all cursor-pointer group ${selectedEstimate?.id === e.id ? 'bg-amber-50 border-amber-300 shadow-md' : 'bg-white hover:border-amber-200 hover:shadow-sm'}`}>
                   <div className="flex justify-between items-start mb-1.5 sm:mb-2"><span className="text-[8px] sm:text-[9px] font-black text-slate-400 font-mono">#{e.slipNumber}</span><span className={`text-[8px] sm:text-[9px] font-black px-1.5 sm:px-2 py-0.5 rounded-full uppercase ${e.status === 'accepted' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>{e.status === 'accepted' ? '採用' : '見積中'}</span></div>
                   <h4 className="font-black text-slate-900 text-xs sm:text-sm truncate">{e.customerName}</h4>
                   <p className="text-[9px] sm:text-[10px] text-slate-500 font-bold truncate">現場: {e.constructionName || '未指定'}</p>
@@ -960,116 +845,85 @@ export const EstimateManager: React.FC<EstimateManagerProps> = ({ onClose, onCon
 
           <div className="flex-1 bg-slate-200/30 overflow-auto flex justify-center items-start relative box-border" ref={containerRef}>
             {selectedEstimate ? (
-              <div className="flex flex-col items-center gap-6 w-full py-8" style={{ minWidth: `calc(210mm * ${previewScale} + 64px)` }}>
-                <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-2 sm:gap-0 no-print bg-white p-2 sm:p-4 rounded-xl sm:rounded-2xl shadow-xl sticky top-2 sm:top-4 z-10 border border-slate-200" style={{ width: `calc(210mm * ${previewScale})`, minWidth: '280px' }}>
-                  <div className="flex gap-1.5 sm:gap-2 justify-center">
-                    {isEditing ? (<><button onClick={handleSave} className="bg-blue-600 text-white px-3 sm:px-6 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-black flex items-center gap-1 sm:gap-2 shadow-lg active:scale-95 hover:bg-blue-700"><Save size={14} className="sm:hidden" /><Save size={18} className="hidden sm:block" /> <span className="hidden sm:inline">保存</span></button><button onClick={() => setIsEditing(false)} className="bg-slate-100 px-3 sm:px-6 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-black hover:bg-slate-200">キャンセル</button></>) : (
-                      <><button onClick={() => setIsEditing(true)} className="bg-slate-900 text-white px-3 sm:px-6 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-black flex items-center gap-1 sm:gap-2 hover:bg-slate-800 transition-all shadow-md"><Edit3 size={14} className="sm:hidden" /><Edit3 size={18} className="hidden sm:block" /> <span className="hidden sm:inline">編集</span></button>
-                        <button onClick={handleAdoptAndConvert} className="bg-emerald-600 text-white px-3 sm:px-6 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-black flex items-center gap-1 sm:gap-2 shadow-lg hover:bg-emerald-700 transition-all"><ShoppingCart size={14} className="sm:hidden" /><ShoppingCart size={18} className="hidden sm:block" /> <span className="hidden sm:inline">採用・</span>伝票へ</button>
-                      </>
-                    )}
-                  </div>
-                  <div className="flex gap-1.5 sm:gap-3 justify-center">
-                    <div className="flex items-center gap-1 bg-slate-100 px-1.5 sm:px-2 py-1 sm:py-1.5 rounded-lg sm:rounded-xl border border-slate-200">
-                      <button onClick={() => setPreviewScale(s => Math.max(0.3, s - 0.1))} className="p-0.5 sm:p-1 hover:bg-slate-200 rounded text-slate-600 transition-colors"><Minus size={14} className="sm:hidden" /><Minus size={16} className="hidden sm:block" /></button>
-                      <span className="text-[10px] sm:text-xs font-mono font-bold text-slate-600 w-8 sm:w-12 text-center">{Math.round(previewScale * 100)}%</span>
-                      <button onClick={() => setPreviewScale(s => Math.min(3.0, s + 0.1))} className="p-0.5 sm:p-1 hover:bg-slate-200 rounded text-slate-600 transition-colors"><Plus size={14} className="sm:hidden" /><Plus size={16} className="hidden sm:block" /></button>
+              isEditing ? (
+                // ---- EDIT MODE: single flat DragDropContext + EstimateEditPanel ----
+                <DragDropContext onDragEnd={handleDragEnd}>
+                  <div className="flex flex-col items-center gap-4 w-full py-6" style={{ minWidth: 'calc(210mm + 64px)' }}>
+                    {/* Sticky control bar */}
+                    <div className="no-print bg-white p-2 sm:p-4 rounded-xl sm:rounded-2xl shadow-xl sticky top-2 sm:top-4 z-20 border border-slate-200 flex gap-2 justify-between items-center" style={{ width: '210mm' }}>
+                      <div className="flex gap-2">
+                        <button onClick={handleSave} className="bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 shadow-lg active:scale-95 hover:bg-blue-700"><Save size={16} /> 保存</button>
+                        <button onClick={() => setIsEditing(false)} className="bg-slate-100 px-4 py-2 rounded-xl text-xs font-black hover:bg-slate-200">キャンセル</button>
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={handleManualAdd} className="bg-slate-800 text-white px-3 py-2 rounded-xl text-xs font-black flex items-center gap-1 hover:bg-slate-700"><Plus size={14} /> 行を追加</button>
+                        <button onClick={async () => window.confirm('見積データを削除しますか？') && storage.deleteEstimate(selectedEstimate.id)} className="p-2 text-rose-500 hover:bg-rose-50 rounded-xl"><Trash2 size={16} /></button>
+                      </div>
                     </div>
-                    <button
-                      onClick={() => {
-                        const info = settings || DEFAULT_COMPANY_INFO;
-                        const customer = customers.find(c => c.name === selectedEstimate.customerName);
-                        const email = customer?.email || "";
-                        const subject = `【${info.companyName}】御見積書のご案内 (#${selectedEstimate.slipNumber})`;
-                        const body = `${selectedEstimate.customerName} 様\n\n平素より大変お世話になっております。${info.companyName}でございます。\n${selectedEstimate.constructionName || "一般"} 現場の御見積書が完成いたしました。\n\n詳細につきましては、本メールまたはシステム画面よりご確認ください。\n\n--------------------------------------------------\n見積番号: ${selectedEstimate.slipNumber}\n見積日: ${selectedEstimate.date}\n有効期限: ${selectedEstimate.validUntil}\n合計金額 (税込): ¥${(selectedEstimate.grandTotal || 0).toLocaleString()}\n--------------------------------------------------\n\nご確認のほど何卒よろしくお願い申し上げます。\n\n${info.companyName}\n${info.address}\nTEL: ${info.phone}\n${info.email}`;
-                        window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+                    {/* Edit panel with cover meta */}
+                    <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-6" style={{ width: '210mm' }}>
+                      <div className="grid grid-cols-2 gap-4 mb-4 text-xs">
+                        <div><label className="block text-slate-500 font-bold mb-1">顧客名</label>
+                          <input value={selectedEstimate.customerName} onChange={e => handleUpdateMeta({ customerName: e.target.value })} className="w-full border rounded-lg px-2 py-1.5 font-bold" /></div>
+                        <div><label className="block text-slate-500 font-bold mb-1">現場名</label>
+                          <input value={selectedEstimate.constructionName || ''} onChange={e => handleUpdateMeta({ constructionName: e.target.value })} className="w-full border rounded-lg px-2 py-1.5 font-bold" /></div>
+                        <div><label className="block text-slate-500 font-bold mb-1">見積日</label>
+                          <input type="date" value={selectedEstimate.date} onChange={e => handleUpdateMeta({ date: e.target.value })} className="w-full border rounded-lg px-2 py-1.5" /></div>
+                        <div><label className="block text-slate-500 font-bold mb-1">有効期限</label>
+                          <input type="date" value={selectedEstimate.validUntil} onChange={e => handleUpdateMeta({ validUntil: e.target.value })} className="w-full border rounded-lg px-2 py-1.5" /></div>
+                      </div>
+                    </div>
+                    <EstimateEditPanel
+                      estimate={selectedEstimate}
+                      onUpdateItem={handleUpdateItem}
+                      onAddPage={() => {
+                        const currentItems = selectedEstimate.items || [];
+                        const newRows = Array.from({ length: 16 }).map((_, i) => createEmptyItem(currentItems.length + i));
+                        setSelectedEstimate({ ...selectedEstimate, items: [...currentItems, ...newRows] });
                       }}
-                      className="bg-slate-100 text-slate-900 border border-slate-200 px-3 sm:px-6 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-black flex items-center gap-1 sm:gap-2 hover:bg-slate-200 transition-all shadow-sm"
-                      title="メールで送信"
-                    >
-                      <Mail size={14} className="sm:hidden" />
-                      <Mail size={18} className="hidden sm:block" />
-                      <span className="hidden sm:inline">メール</span>
-                    </button>
-                    <button onClick={() => window.print()} className="bg-slate-100 text-slate-900 border border-slate-200 px-3 sm:px-6 py-2 sm:py-2.5 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-black flex items-center gap-1 sm:gap-2 hover:bg-slate-200 transition-all shadow-sm"><Printer size={14} className="sm:hidden" /><Printer size={18} className="hidden sm:block" /> <span className="hidden sm:inline">印刷</span></button>
-                    <button onClick={async () => window.confirm('見積データを削除しますか？') && storage.deleteEstimate(selectedEstimate.id)} className="p-2 sm:p-2.5 text-rose-500 hover:bg-rose-50 rounded-lg sm:rounded-xl transition-all"><Trash2 size={16} className="sm:hidden" /><Trash2 size={20} className="hidden sm:block" /></button>
+                      masterItems={masterItems}
+                    />
                   </div>
+                </DragDropContext>
+              ) : (
+                // ---- VIEW MODE: scaled paginated A4 pages ----
+                <div className="flex flex-col items-center gap-6 w-full py-8" style={{ minWidth: `calc(210mm * ${previewScale} + 64px)` }}>
+                  {/* View mode control bar */}
+                  <div className="no-print bg-white p-2 sm:p-4 rounded-xl sm:rounded-2xl shadow-xl sticky top-2 sm:top-4 z-10 border border-slate-200 flex gap-2 flex-wrap justify-between items-center" style={{ width: `calc(210mm * ${previewScale})`, minWidth: '280px' }}>
+                    <div className="flex gap-2">
+                      <button onClick={() => setIsEditing(true)} className="bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 hover:bg-slate-800 shadow-md"><Edit3 size={16} /> 編集</button>
+                      <button onClick={handleAdoptAndConvert} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 shadow-lg hover:bg-emerald-700"><ShoppingCart size={16} /> 採用・伝票へ</button>
+                    </div>
+                    <div className="flex gap-2 items-center">
+                      <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-xl border border-slate-200">
+                        <button onClick={() => setPreviewScale(s => Math.max(0.3, s - 0.1))} className="p-1 hover:bg-slate-200 rounded"><Minus size={14} /></button>
+                        <span className="text-xs font-mono font-bold text-slate-600 w-10 text-center">{Math.round(previewScale * 100)}%</span>
+                        <button onClick={() => setPreviewScale(s => Math.min(3.0, s + 0.1))} className="p-1 hover:bg-slate-200 rounded"><Plus size={14} /></button>
+                      </div>
+                      <button onClick={() => window.print()} className="bg-slate-100 text-slate-900 border border-slate-200 px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 hover:bg-slate-200 shadow-sm"><Printer size={16} /> 印刷</button>
+                      <button onClick={async () => window.confirm('見積データを削除しますか？') && storage.deleteEstimate(selectedEstimate.id)} className="p-2 text-rose-500 hover:bg-rose-50 rounded-xl"><Trash2 size={18} /></button>
+                    </div>
+                  </div>
+                  {/* Cover page */}
+                  <div id="print-target" className="estimate-print-page bg-white shadow-2xl print:shadow-none print:m-0 box-border origin-top"
+                    style={{ width: '210mm', minHeight: '297mm', transform: `scale(${previewScale})`, pageBreakAfter: 'always' }}>
+                    <EstimateCoverPage estimate={selectedEstimate} isEditing={false} onUpdateMeta={handleUpdateMeta}
+                      pageTotals={Array.from({ length: Math.max(1, Math.ceil((selectedEstimate.items || []).length / 16)) }).map((_, i) => ({
+                        page: i + 1,
+                        total: (selectedEstimate.items || []).slice(i * 16, i * 16 + 16).reduce((s, item) => s + (item.appliedPrice || 0) * (item.quantity || 0), 0)
+                      }))}
+                      settings={settings}
+                    />
+                  </div>
+                  {/* Detail pages */}
+                  {Array.from({ length: Math.max(1, Math.ceil((selectedEstimate.items || []).length / 16)) }).map((_, i) => (
+                    <div key={`detail-${i}`} className="estimate-print-page bg-white shadow-2xl print:shadow-none print:m-0 box-border origin-top"
+                      style={{ width: '210mm', minHeight: '297mm', transform: `scale(${previewScale})`, pageBreakAfter: i < Math.max(1, Math.ceil((selectedEstimate.items || []).length / 16)) - 1 ? 'always' : 'auto' }}>
+                      <EstimateDetailPage estimate={selectedEstimate} pageNumber={i + 1} settings={settings} />
+                    </div>
+                  ))}
                 </div>
-
-                {(() => {
-                  const allItems = selectedEstimate.items || [];
-                  const numDetailPages = Math.max(1, Math.ceil(allItems.length / 16));
-
-                  // Calculate totals for each detail page
-                  const pageTotals = Array.from({ length: numDetailPages }).map((_, idx) => {
-                    const startIdx = idx * 16;
-                    const pageItems = allItems.slice(startIdx, startIdx + 16);
-                    const total = pageItems.reduce((sum, item) => sum + ((item.appliedPrice || 0) * (item.quantity || 0)), 0);
-                    return { page: idx + 1, total };
-                  });
-
-                  return (
-                    <>
-                      {Array.from({ length: 1 + numDetailPages }).map((_, pageIdx) => {
-                        const detailPageIdx = pageIdx - 1; // pageIdx 0 = cover, 1+ = detail pages
-                        const startIdx = detailPageIdx * 16;
-                        const pageItems = pageIdx === 0 ? [] : allItems.slice(startIdx, startIdx + 16);
-                        const paddedItems = [...Array(16)].map((_, i) => pageItems[i] || { name: '', model: '', dimensions: '', quantity: 0, unit: '個', listPrice: 0, appliedPrice: 0, manufacturer: '' });
-                        const info = settings || DEFAULT_COMPANY_INFO;
-
-
-                        return (
-                          <div
-                            key={pageIdx === 0 ? "cover" : `detail-${detailPageIdx}`}
-                            id={pageIdx === 0 ? "print-target" : undefined}
-                            className="estimate-print-page bg-white shadow-2xl w-full print:shadow-none print:m-0 box-border origin-top transition-transform duration-200"
-                            style={{
-                              width: '210mm',
-                              minHeight: '297mm',
-                              transform: `scale(${previewScale})`,
-                              pageBreakAfter: pageIdx < numDetailPages ? 'always' : 'auto'
-                            }}
-                          >
-                            {pageIdx === 0 ? (
-                              <EstimateCoverPage
-                                estimate={selectedEstimate}
-                                isEditing={isEditing}
-                                onUpdateMeta={handleUpdateMeta}
-                                pageTotals={pageTotals}
-                                settings={settings}
-                              />
-                            ) : (
-                              <EstimateDetailPage
-                                estimate={{ ...selectedEstimate, items: paddedItems }}
-                                pageNumber={pageIdx}
-                                isEditing={isEditing}
-                                onUpdateItem={(idx, data) => handleUpdateItem(startIdx + idx, data)}
-                                onDeleteItem={(i) => handleUpdateItem(startIdx + i, { name: '', quantity: 0, appliedPrice: 0, listPrice: 0, model: '', dimensions: '', manufacturer: '' })}
-                                masterItems={masterItems}
-                                settings={settings}
-                              />
-                            )}
-                          </div>
-                        );
-                      })}
-
-                      {isEditing && (
-                        <button
-                          onClick={() => {
-                            const currentItems = selectedEstimate.items || [];
-                            const startIdx = currentItems.length;
-                            const newRows = Array.from({ length: 16 }).map((_, i) => createEmptyItem(startIdx + i));
-                            setSelectedEstimate({ ...selectedEstimate, items: [...currentItems, ...newRows] });
-                          }}
-                          className="bg-amber-500 text-white px-8 py-4 rounded-2xl text-sm font-black flex items-center gap-3 shadow-lg hover:bg-amber-600 transition-all active:scale-95 no-print"
-                        >
-                          <Plus size={24} /> ページを追加 (16行)
-                        </button>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
+              )
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-slate-300">
                 <FileText size={80} className="opacity-10 mb-4" />

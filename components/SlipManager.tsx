@@ -1,9 +1,10 @@
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { Slip, SlipItem, SlipType, DeliveryTime, DeliveryDestination, MaterialItem, PricingRule, Customer } from '../types';
-import { X, Trash2, Printer, FileText, ShoppingCart, Save, HardHat, Loader2, Edit3, FileOutput, CheckSquare, Square, Search, MapPin, Clock, Users, Info, RotateCcw, AlertTriangle, ArrowRight, Package, Layers, Check, Calculator, History, Archive, FileStack, ChevronDown, ChevronRight, Building2, Eye, EyeOff, Calendar, User, UserCheck, Camera, Sparkles, Plus, Minus, MessageSquare, Edit2, LayoutGrid, FileSearch, Database, Mail } from 'lucide-react';
+import { X, Trash2, Printer, FileText, ShoppingCart, Save, HardHat, Loader2, Edit3, FileOutput, CheckSquare, Square, Search, MapPin, Clock, Users, Info, RotateCcw, AlertTriangle, ArrowRight, Package, Layers, Check, Calculator, History, Archive, FileStack, ChevronDown, ChevronRight, Building2, Eye, EyeOff, Calendar, User, UserCheck, Camera, Sparkles, Plus, Minus, MessageSquare, Edit2, LayoutGrid, FileSearch, Database, Mail, GripVertical } from 'lucide-react';
 import * as storage from '../services/firebaseService';
+import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 
 import { AppSettings } from '../types';
 
@@ -21,7 +22,10 @@ const DEFAULT_COMPANY_INFO: AppSettings = {
     ]
 };
 
-const generateId = () => Math.random().toString(36).substring(2) + Date.now().toString(36);
+const generateId = () => {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+    return Math.random().toString(36).substring(2, 11) + Date.now().toString(36);
+};
 
 const generateSlipNumber = () => {
     const d = new Date();
@@ -373,6 +377,86 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
         </div>
     );
 };
+const CartItemRow = React.memo(({
+    item,
+    index,
+    activeMode,
+    onUpdateCart,
+    handleRegisterToMaster,
+    onDelete
+}: {
+    item: SlipItem,
+    index: number,
+    activeMode: 'sales' | 'return',
+    onUpdateCart: React.Dispatch<React.SetStateAction<SlipItem[]>>,
+    handleRegisterToMaster: (item: SlipItem) => void,
+    onDelete: (index: number) => void
+}) => {
+    return (
+        <Draggable draggableId={item.id} index={index}>
+            {(provided, snapshot) => (
+                <tr
+                    ref={provided.innerRef}
+                    {...provided.draggableProps}
+                    {...provided.dragHandleProps}
+                    className={`group transition-all ${snapshot.isDragging ? 'bg-blue-100 shadow-xl ring-2 ring-blue-500/50 rounded-xl z-50' : 'hover:bg-slate-50'}`}
+                    style={provided.draggableProps.style}
+                >
+                    <td className="w-8 text-center">
+                        <div
+                            className="p-1 text-slate-300 hover:text-slate-500 transition-colors cursor-grab active:cursor-grabbing"
+                            title="ドラッグして移動"
+                        >
+                            <GripVertical size={16} />
+                        </div>
+                    </td>
+                    <td className="py-4">
+                        <div className="flex flex-col">
+                            <input
+                                value={item.name}
+                                onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, name: e.target.value } : pi))}
+                                placeholder="品名"
+                                className="w-full bg-transparent border-none font-bold text-slate-800 outline-none"
+                            />
+                            <div className="flex items-center gap-1 mt-1">
+                                <span className="px-1.5 py-0.5 bg-slate-100 text-[8px] font-black text-slate-400 rounded border border-slate-200">自由入力</span>
+                                {!item.id.startsWith('registered-') && (
+                                    <button
+                                        onClick={() => handleRegisterToMaster(item)}
+                                        className="flex items-center gap-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-600 text-[8px] font-black rounded border border-emerald-100 hover:bg-emerald-100 transition-colors"
+                                    >
+                                        <Database size={8} /> マスタ登録
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    </td>
+                    <td className="text-center">
+                        <input
+                            type="number"
+                            value={item.quantity}
+                            onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, quantity: parseInt(e.target.value) || 0 } : pi))}
+                            className="w-full py-2 border rounded-xl text-center font-black bg-slate-50 no-spin-buttons outline-none focus:border-blue-400"
+                        />
+                    </td>
+                    <td className="text-center">
+                        <input
+                            type="number"
+                            value={item.appliedPrice || 0}
+                            onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, appliedPrice: parseInt(e.target.value) || 0 } : pi))}
+                            className="w-full py-2 border rounded-xl text-center font-black bg-slate-50 no-spin-buttons outline-none focus:border-blue-400 text-emerald-600"
+                        />
+                    </td>
+                    <td className="text-right">
+                        <button onClick={() => onDelete(index)} className="p-2 text-rose-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all">
+                            <Trash2 size={18} />
+                        </button>
+                    </td>
+                </tr>
+            )}
+        </Draggable>
+    );
+});
 
 export const SlipManager: React.FC<{
     mode: 'sales' | 'return';
@@ -402,7 +486,10 @@ export const SlipManager: React.FC<{
     const [printingSlips, setPrintingSlips] = useState<Slip[]>([]);
     const [confirmingOutbound, setConfirmingOutbound] = useState<Slip | null>(null);
     const [actualQuantities, setActualQuantities] = useState<Record<string, number>>({});
+    const [issuerName, setIssuerName] = useState('');
     const [editingSlipId, setEditingSlipId] = useState<string | null>(null);
+    const [preEditTab, setPreEditTab] = useState<'create' | 'pending' | 'reslip' | 'history'>('pending');
+    const [deletingSlipId, setDeletingSlipId] = useState<string | null>(null);
 
     useEffect(() => {
         if (onEditModeChange) onEditModeChange(!!editingSlipId);
@@ -486,9 +573,9 @@ export const SlipManager: React.FC<{
         setItemSearchQuery(''); setShowItemSuggestions(false);
     };
 
-    const handleManualAdd = () => {
+    const handleManualAdd = useCallback(() => {
         const newItem: SlipItem = {
-            id: `manual-${Date.now()}`,
+            id: generateId(),
             category: '消耗品・雑材',
             name: '',
             model: '',
@@ -504,9 +591,23 @@ export const SlipManager: React.FC<{
             updatedAt: Date.now()
         };
         onUpdateCart(prev => [...prev, newItem]);
-    };
+    }, [onUpdateCart]);
 
-    const handleRegisterToMaster = async (item: SlipItem) => {
+    const handleDeleteFromCart = useCallback((index: number) => {
+        onUpdateCart(prev => prev.filter((_, i) => i !== index));
+    }, [onUpdateCart]);
+
+    const handleDragEnd = useCallback((result: DropResult) => {
+        if (!result.destination) return;
+
+        const items = Array.from(cart);
+        const [reorderedItem] = items.splice(result.source.index, 1);
+        items.splice(result.destination.index, 0, reorderedItem);
+
+        onUpdateCart(items);
+    }, [cart, onUpdateCart]);
+
+    const handleRegisterToMaster = useCallback(async (item: SlipItem) => {
         if (!item.name) return alert('品名を入力してください');
         if (window.confirm(`${item.name} (${item.model}) を資材マスターに登録しますか？`)) {
             const materialData: Omit<MaterialItem, 'id' | 'updatedAt'> = {
@@ -528,7 +629,7 @@ export const SlipManager: React.FC<{
             // IDを更新して、再登録を防ぐ
             onUpdateCart(prev => prev.map(i => i.id === item.id ? { ...i, id: 'registered-' + Date.now() } : i));
         }
-    };
+    }, [onUpdateCart]);
 
 
 
@@ -550,8 +651,15 @@ export const SlipManager: React.FC<{
                     totalAmount: total, taxAmount: Math.floor(total * 0.1), grandTotal: Math.floor(total * 1.1),
                     note, deliveryTime: time, deliveryDestination: dest, orderingPerson, receivingPerson
                 };
-                await storage.updateSlip(editingSlipId, updateData);
-                setEditingSlipId(null);
+                try {
+                    await storage.updateSlip(editingSlipId, updateData);
+                    setEditingSlipId(null);
+                    onClearCart();
+                    handleTabChange(preEditTab); // return to the tab we came from
+                } catch (e: any) {
+                    alert(`保存に失敗しました: ${e?.message || '不明なエラー'}`);
+                }
+                return;
             } else {
                 const gid = generateId();
                 const sNo = generateSlipNumber();
@@ -564,16 +672,19 @@ export const SlipManager: React.FC<{
                 await storage.addSlip(cleanForFirestore(newSlip));
                 // 新規保存時は自動的にピッキング用伝票を表示（金額表示なし）
                 setPrintingSlips([{ ...newSlip, id: generateId() } as Slip]);
+                onClearCart();
+                handleTabChange(activeMode === 'return' ? 'history' : 'pending');
             }
-            onClearCart();
-            handleTabChange(activeMode === 'return' ? 'history' : 'pending');
         } finally { setIsSaving(false); }
     };
 
     const handleConfirmDelivery = async () => {
         if (!confirmingOutbound) return;
-        const issuer = window.prompt("出庫担当者の名前を入力してください。", "");
-        if (!issuer) return;
+        if (!issuerName.trim()) {
+            alert('出庫担当者の名前を入力してください。');
+            return;
+        }
+        const issuer = issuerName.trim();
 
         const hasNegativeQuantity = confirmingOutbound.items.some(i => (actualQuantities[i.id] ?? i.quantity) < 0);
         if (hasNegativeQuantity) {
@@ -629,6 +740,7 @@ export const SlipManager: React.FC<{
                 await storage.addSlip(cleanForFirestore(rs));
             }
             setConfirmingOutbound(null);
+            setIssuerName('');
             handleTabChange(missingItems.length > 0 ? 'reslip' : 'pending');
             // お客様渡し用の仮納品書を発行
             setPrintingSlips([{ ...provSlip, id: generateId() } as Slip]);
@@ -723,7 +835,12 @@ export const SlipManager: React.FC<{
     };
 
     const handleEditSlip = (s: Slip) => {
-        setEditingSlipId(s.id || null);
+        if (!s.id) {
+            alert('エラー: 伝票IDが見つかりません。伝票履歴から再度アクセスしてください。');
+            return;
+        }
+        setPreEditTab(activeTab); // 編集前のタブを記憶
+        setEditingSlipId(s.id);
         setCustomerName(s.customerName);
         setSiteName(s.constructionName || '');
         setOrderingPerson(s.orderingPerson || '');
@@ -777,10 +894,29 @@ export const SlipManager: React.FC<{
 
     return (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            {deletingSlipId && (
+                <div className="fixed inset-0 z-[120] bg-slate-900/80 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 flex flex-col gap-4">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center shrink-0">
+                                <Trash2 size={18} className="text-rose-600" />
+                            </div>
+                            <div>
+                                <p className="font-black text-slate-900">伝票の削除</p>
+                                <p className="text-xs text-slate-500 mt-0.5">この伝票を完全に削除します。元に戻せません。</p>
+                            </div>
+                        </div>
+                        <div className="flex gap-3 mt-2">
+                            <button onClick={() => setDeletingSlipId(null)} className="flex-1 py-2.5 rounded-xl border font-bold text-sm text-slate-600 hover:bg-slate-50 transition-colors">キャンセル</button>
+                            <button onClick={async () => { await storage.deleteSlip(deletingSlipId); setDeletingSlipId(null); }} className="flex-1 py-2.5 rounded-xl bg-rose-600 text-white font-black text-sm hover:bg-rose-700 active:scale-95 transition-all">削除する</button>
+                        </div>
+                    </div>
+                </div>
+            )}
             {confirmingOutbound && (
                 <div className="fixed inset-0 z-[110] bg-slate-900/80 flex items-center justify-center p-4">
                     <div className="bg-white rounded-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
-                        <div className="p-4 border-b bg-slate-50 font-bold flex justify-between items-center"><h3>出庫実数の確定 (No. {confirmingOutbound.slipNumber})</h3><button onClick={() => setConfirmingOutbound(null)}><X /></button></div>
+                        <div className="p-4 border-b bg-slate-50 font-bold flex justify-between items-center"><h3>出庫実数の確定 (No. {confirmingOutbound.slipNumber})</h3><button onClick={() => { setConfirmingOutbound(null); setIssuerName(''); }}><X /></button></div>
                         <div className="p-6 overflow-y-auto space-y-4">
                             <table className="w-full text-sm">
                                 <thead><tr className="border-b text-slate-400 text-xs"><th className="text-left pb-2">品名 / 規格</th><th className="w-20 pb-2 text-center">受注数</th><th className="w-28 pb-2 text-center">出庫確定数</th></tr></thead>
@@ -812,7 +948,23 @@ export const SlipManager: React.FC<{
                                 })}</tbody>
                             </table>
                         </div>
-                        <div className="p-4 border-t flex justify-end gap-3"><button onClick={() => setConfirmingOutbound(null)} className="px-4 py-2 text-sm font-bold text-slate-500 hover:bg-slate-100 rounded-lg">キャンセル</button><button onClick={handleConfirmDelivery} className="bg-blue-600 text-white px-8 py-2.5 rounded-xl font-bold shadow-lg active:scale-95 transition-all">数量を確定して仮納品書発行</button></div>
+                        <div className="p-4 border-t space-y-3">
+                            <div>
+                                <label className="block text-xs font-black text-slate-600 mb-1">出庫担当者名 <span className="text-rose-500">*必須</span></label>
+                                <input
+                                    type="text"
+                                    value={issuerName}
+                                    onChange={e => setIssuerName(e.target.value)}
+                                    placeholder="担当者名を入力..."
+                                    className="w-full border-2 rounded-xl px-3 py-2 font-bold text-sm outline-none focus:border-blue-400 transition-colors"
+                                    onKeyDown={e => e.key === 'Enter' && handleConfirmDelivery()}
+                                />
+                            </div>
+                            <div className="flex justify-end gap-3">
+                                <button onClick={() => { setConfirmingOutbound(null); setIssuerName(''); }} className="px-4 py-2 text-sm font-bold text-slate-500 hover:bg-slate-100 rounded-lg">キャンセル</button>
+                                <button onClick={handleConfirmDelivery} disabled={!issuerName.trim()} className="bg-blue-600 text-white px-8 py-2.5 rounded-xl font-bold shadow-lg active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed">数量を確定して仮納品書発行</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}
@@ -994,28 +1146,31 @@ export const SlipManager: React.FC<{
                                                 {showItemSuggestions && itemSuggestions.length > 0 && (<div className="absolute top-full left-0 right-0 bg-white border shadow-2xl z-30 rounded-[1.5rem] mt-2 max-h-64 overflow-y-auto">{itemSuggestions.map(i => (<div key={i.id} onClick={() => handleAddFromMaster(i)} className="p-4 hover:bg-blue-50 cursor-pointer border-b last:border-0 flex justify-between items-center font-bold text-sm">{i.name} <span className="text-[10px] bg-slate-100 px-2 py-1 rounded font-mono ml-2">{i.model} {i.dimensions}</span></div>))}</div>)}
                                             </div>
                                             <table className="w-full text-sm">
-                                                <thead><tr className="text-slate-400 text-[10px] uppercase font-black tracking-widest border-b pb-2"><th className="pb-2 text-left">品名 / 明細</th><th className="w-24 text-center pb-2">数量</th><th className="w-28 text-center pb-2">単価(¥)</th><th className="w-12"></th></tr></thead>
-                                                <tbody className="divide-y">{cart.map((item, idx) => (<tr key={idx} className="group hover:bg-slate-50"><td className="py-4">
-                                                    <div className="flex flex-col">
-                                                        <input
-                                                            value={item.name}
-                                                            onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, name: e.target.value } : pi))}
-                                                            placeholder="品名"
-                                                            className="w-full bg-transparent border-none font-bold text-slate-800 outline-none"
-                                                        />
-                                                        <div className="flex items-center gap-1 mt-1">
-                                                            <div className="px-1.5 py-0.5 bg-slate-100 text-[8px] font-black text-slate-400 rounded border border-slate-200">自由入力</div>
-                                                            {!item.id.startsWith('registered-') && (
-                                                                <button
-                                                                    onClick={() => handleRegisterToMaster(item)}
-                                                                    className="flex items-center gap-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-600 text-[8px] font-black rounded border border-emerald-100 hover:bg-emerald-100 transition-colors"
-                                                                >
-                                                                    <Database size={8} /> マスタ登録
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                </td><td className="text-center"><input type="number" value={item.quantity} onChange={e => { const n = [...cart]; n[idx].quantity = parseInt(e.target.value) || 0; onUpdateCart(n); }} className="w-full py-2 border rounded-xl text-center font-black bg-slate-50 no-spin-buttons outline-none focus:border-blue-400" /></td><td className="text-center"><input type="number" value={item.appliedPrice || 0} onChange={e => { const n = [...cart]; n[idx].appliedPrice = parseInt(e.target.value) || 0; onUpdateCart(n); }} className="w-full py-2 border rounded-xl text-center font-black bg-slate-50 no-spin-buttons outline-none focus:border-blue-400 text-emerald-600" /></td><td className="text-right"><button onClick={() => onUpdateCart(cart.filter((_, i) => i !== idx))} className="p-2 text-rose-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"><Trash2 size={18} /></button></td></tr>))}</tbody>
+                                                <thead><tr className="text-slate-400 text-[10px] uppercase font-black tracking-widest border-b pb-2"><th className="w-8"></th><th className="pb-2 text-left">品名 / 明細</th><th className="w-24 text-center pb-2">数量</th><th className="w-28 text-center pb-2">単価(¥)</th><th className="w-12"></th></tr></thead>
+                                                <DragDropContext onDragEnd={handleDragEnd}>
+                                                    <Droppable droppableId="cart-items">
+                                                        {(provided) => (
+                                                            <tbody
+                                                                {...provided.droppableProps}
+                                                                ref={provided.innerRef}
+                                                                className="divide-y"
+                                                            >
+                                                                {cart.map((item, idx) => (
+                                                                    <CartItemRow
+                                                                        key={item.id}
+                                                                        item={item}
+                                                                        index={idx}
+                                                                        activeMode={activeMode}
+                                                                        onUpdateCart={onUpdateCart}
+                                                                        handleRegisterToMaster={handleRegisterToMaster}
+                                                                        onDelete={handleDeleteFromCart}
+                                                                    />
+                                                                ))}
+                                                                {provided.placeholder}
+                                                            </tbody>
+                                                        )}
+                                                    </Droppable>
+                                                </DragDropContext>
                                             </table>
                                         </div>
                                     </div>
@@ -1087,7 +1242,7 @@ export const SlipManager: React.FC<{
                                                                                 <Edit3 size={18} />
                                                                             </button>
                                                                         )}
-                                                                        <button onClick={() => sl.id && window.confirm('完全に削除しますか？') && storage.deleteSlip(sl.id)} className="p-2.5 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all">
+                                                                        <button onClick={() => sl.id && setDeletingSlipId(sl.id)} className="p-2.5 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all" title="削除">
                                                                             <Trash2 size={18} />
                                                                         </button>
                                                                     </div>
@@ -1151,7 +1306,7 @@ export const SlipManager: React.FC<{
                                         >
                                             <Mail size={20} />
                                         </button>
-                                        <button onClick={() => s.id && window.confirm('削除しますか？') && storage.deleteSlip(s.id)} className="p-3 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-2xl transition-all"><Trash2 size={20} /></button>
+                                        <button onClick={() => s.id && setDeletingSlipId(s.id)} className="p-3 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-2xl transition-all" title="削除"><Trash2 size={20} /></button>
                                     </div>
                                 </div>
                             ))}
