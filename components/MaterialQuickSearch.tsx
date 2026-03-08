@@ -55,14 +55,17 @@ export const MaterialQuickSearch: React.FC<MaterialQuickSearchProps> = ({
     const filteredItems = useMemo(() => {
         if (!searchQuery.trim()) return items;
 
-        const query = searchQuery.toLowerCase();
-        return items.filter(item =>
-            item.name.toLowerCase().includes(query) ||
-            (item.category || '').toLowerCase().includes(query) ||
-            (item.model || '').toLowerCase().includes(query) ||
-            (item.manufacturer || '').toLowerCase().includes(query) ||
-            (item.location || '').toLowerCase().includes(query)
-        );
+        // Normalize: replace full-width spaces with half-width, split into keywords
+        const normalizeText = (text: string) => text.replace(/　/g, ' ').trim().toLowerCase();
+        const keywords = normalizeText(searchQuery).split(' ').filter(k => k.length > 0);
+
+        return items.filter(item => {
+            const haystack = normalizeText(
+                [item.name, item.category, item.model, item.manufacturer, item.location, item.dimensions ?? ''].join(' ')
+            );
+            // All keywords must match (AND search), works with full-width and half-width spaces
+            return keywords.every(k => haystack.includes(k));
+        });
     }, [items, searchQuery]);
 
     return (
