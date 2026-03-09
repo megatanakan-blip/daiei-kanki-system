@@ -413,7 +413,7 @@ const App: React.FC = () => {
             {/* Hidden file input for AI upload */}
             <input type="file" ref={fileInputRef} onChange={handleAIUpload} className="hidden" accept=".xlsx,.xls,.csv,image/*,application/pdf" />
 
-            {isFormOpen && <MaterialForm isOpen={isFormOpen} onClose={() => { setIsFormOpen(false); setEditingItem(null); }} onSave={async data => { if (editingItem) await storage.updateMaterial(editingItem.id, data); else await storage.addMaterial(data); setIsFormOpen(false); setEditingItem(null); }} initialData={editingItem} />}
+            {isFormOpen && <MaterialForm isOpen={isFormOpen} onClose={() => { setIsFormOpen(false); setEditingItem(null); }} onSave={async data => { if (editingItem) await storage.updateMaterial(editingItem.id, data); else await storage.addMaterial(data); setIsFormOpen(false); setEditingItem(null); }} initialData={editingItem} settings={settings} items={items} onUpdateCategories={async (cats) => { if (settings) await storage.updateSettings(settings.id || 'new', { ...settings, categories: cats }); }} />}
             {isPricingManagerOpen && <PricingManager rules={pricingRules} customers={customers} items={items} onClose={() => setIsPricingManagerOpen(false)} />}
             {slipManagerOpen && (
                 <SlipManager

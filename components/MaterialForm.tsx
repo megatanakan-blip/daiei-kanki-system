@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { MaterialItem, MATERIAL_CATEGORIES } from '../types';
-import { Plus, Save, X, Link as LinkIcon, Calculator, RotateCcw, Box, Ruler, MapPin } from 'lucide-react';
+import { MaterialItem, MATERIAL_CATEGORIES, AppSettings } from '../types';
+import { Plus, Save, X, Link as LinkIcon, Calculator, RotateCcw, Box, Ruler, MapPin, Settings2 } from 'lucide-react';
 
 // Added isOpen and renamed onCancel to onClose to match App.tsx usage.
 // Updated onSave return type to allow Promise as it's used in App.tsx.
@@ -11,9 +11,12 @@ interface MaterialFormProps {
   initialData?: MaterialItem | null;
   defaultCategory?: string;
   isOpen?: boolean;
+  settings?: AppSettings | null;
+  onUpdateCategories?: (cats: string[]) => Promise<void>;
+  items?: MaterialItem[];
 }
 
-export const MaterialForm: React.FC<MaterialFormProps> = ({ onSave, onClose, initialData, defaultCategory = "鋼管類", isOpen }) => {
+export const MaterialForm: React.FC<MaterialFormProps> = ({ onSave, onClose, initialData, defaultCategory = "鋼管類", isOpen, settings, onUpdateCategories, items = [] }) => {
   // Expanded state to include required Material fields missing in previous implementation
   const [formData, setFormData] = useState({
     category: defaultCategory,
@@ -35,6 +38,8 @@ export const MaterialForm: React.FC<MaterialFormProps> = ({ onSave, onClose, ini
   const [isCustomCategory, setIsCustomCategory] = useState(false);
   const [calcRate, setCalcRate] = useState<string>('');
   const [calcType, setCalcType] = useState<'list' | 'cost'>('list');
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
+  const [newCategoryInput, setNewCategoryInput] = useState('');
 
   useEffect(() => {
     if (initialData) {
@@ -54,8 +59,9 @@ export const MaterialForm: React.FC<MaterialFormProps> = ({ onSave, onClose, ini
         costPrice: (initialData.costPrice ?? 0).toString(),
         sourceUrl: initialData.sourceUrl || '',
       });
-      // Fixed: Type assertion for includes to handle string category
-      setIsCustomCategory(!(MATERIAL_CATEGORIES as readonly string[]).includes(initialData.category));
+      // 有効分類リストに含まれているかチェック
+      const all = Array.from(new Set([...MATERIAL_CATEGORIES, ...(settings?.categories || [])]));
+      setIsCustomCategory(!all.includes(initialData.category));
     } else {
       setFormData({
         category: defaultCategory,
@@ -89,6 +95,35 @@ export const MaterialForm: React.FC<MaterialFormProps> = ({ onSave, onClose, ini
       if (costP > 0 && rate < 100) newSelling = Math.round(costP / (1 - (rate / 100)));
     }
     if (newSelling > 0) setFormData(prev => ({ ...prev, sellingPrice: newSelling.toString() }));
+  };
+
+  // 有効な分類リスト: MATERIAL_CATEGORIES + settings.categoriesを重複なしでマージ
+  const effectiveCategories = Array.from(new Set([
+    ...MATERIAL_CATEGORIES,
+    ...(settings?.categories || [])
+  ]));
+
+  const handleAddCategory = async () => {
+    const trimmed = newCategoryInput.trim();
+    if (!trimmed) return;
+    if (effectiveCategories.includes(trimmed)) { alert('その分類名は既に存在します。'); return; }
+    const newCats = [...effectiveCategories, trimmed];
+    await onUpdateCategories?.(newCats);
+    setFormData(p => ({ ...p, category: trimmed }));
+    setNewCategoryInput('');
+  };
+
+  const handleDeleteCategory = async (cat: string) => {
+    // 使用中チェック
+    const usedCount = items.filter(i => i.category === cat).length;
+    if (usedCount > 0) {
+      alert(`「${cat}」は現在${usedCount}件の資材に適用されているため削除できません。`);
+      return;
+    }
+    if (!window.confirm(`「${cat}」を分類リストから削除しますか？`)) return;
+    const newCats = effectiveCategories.filter(c => c !== cat);
+    await onUpdateCategories?.(newCats);
+    if (formData.category === cat) setFormData(p => ({ ...p, category: newCats[0] || '' }));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -137,17 +172,56 @@ export const MaterialForm: React.FC<MaterialFormProps> = ({ onSave, onClose, ini
         <form onSubmit={handleSubmit} className="p-2 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-1.5">
-              <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest min-h-[20px]">資材分類</label>
+              <label className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest min-h-[20px]">資材分類
+                <button type="button" onClick={() => setShowCategoryManager(v => !v)} className="ml-auto flex items-center gap-1 text-[9px] text-blue-500 hover:text-blue-700 font-black transition-colors">
+                  <Settings2 size={11} />分類を管理
+                </button>
+              </label>
               {isCustomCategory ? (
                 <div className="flex gap-2">
                   <input type="text" name="category" value={formData.category} onChange={e => setFormData(p => ({ ...p, category: e.target.value }))} placeholder="分類名を入力" required className="flex-grow px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:ring-0 focus:border-blue-500 focus:bg-white transition-all outline-none font-bold text-sm" />
                   <button type="button" onClick={() => setIsCustomCategory(false)} className="p-3 bg-slate-100 rounded-2xl text-slate-500 hover:bg-slate-200 transition-colors"><RotateCcw size={18} /></button>
                 </div>
               ) : (
-                <select name="category" value={formData.category} onChange={e => { if (e.target.value === '__NEW__') setIsCustomCategory(true); else setFormData(p => ({ ...p, category: e.target.value })); }} className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:ring-0 focus:border-blue-500 focus:bg-white transition-all outline-none font-bold text-sm">
-                  {MATERIAL_CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                  <option value="__NEW__" className="text-blue-600 font-bold">+ 新規分類を作成</option>
+                <select name="category" value={formData.category} onChange={e => setFormData(p => ({ ...p, category: e.target.value }))} className="w-full px-4 py-3 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:ring-0 focus:border-blue-500 focus:bg-white transition-all outline-none font-bold text-sm">
+                  {effectiveCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                 </select>
+              )}
+              {showCategoryManager && (
+                <div className="mt-2 p-4 bg-blue-50 border-2 border-blue-100 rounded-2xl space-y-3 animate-in slide-in-from-top-2 duration-150">
+                  <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest">分類の追加・削除</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newCategoryInput}
+                      onChange={e => setNewCategoryInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddCategory(); } }}
+                      placeholder="新しい分類名..."
+                      className="flex-grow px-3 py-2 bg-white border-2 border-blue-100 rounded-xl text-sm font-bold outline-none focus:border-blue-400 transition-all"
+                    />
+                    <button type="button" onClick={handleAddCategory} className="px-4 py-2 bg-blue-600 text-white text-xs font-black rounded-xl hover:bg-blue-700 active:scale-95 transition-all whitespace-nowrap flex items-center gap-1">
+                      <Plus size={13} />追加
+                    </button>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto flex flex-wrap gap-1.5 pr-1">
+                    {effectiveCategories.map(cat => {
+                      const usedCount = items.filter(i => i.category === cat).length;
+                      return (
+                        <div key={cat} className="flex items-center gap-1 bg-white border border-blue-200 rounded-lg px-2.5 py-1">
+                          <span className="text-xs font-bold text-slate-700">{cat}</span>
+                          {usedCount > 0 ? (
+                            <span className="text-[9px] text-slate-400 font-bold ml-0.5">({usedCount})</span>
+                          ) : (
+                            <button type="button" onClick={() => handleDeleteCategory(cat)} className="text-slate-300 hover:text-rose-500 transition-colors ml-0.5" title="削除">
+                              <X size={12} />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[9px] text-slate-400">※ 数字は適用中の資材数。使用中の分類は「×」で削除できません。</p>
+                </div>
               )}
             </div>
             <div className="space-y-1.5">
