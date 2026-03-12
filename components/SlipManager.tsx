@@ -411,13 +411,33 @@ const CartItemRow = React.memo(({
                         </div>
                     </td>
                     <td className="py-4">
-                        <div className="flex flex-col">
+                        <div className="flex flex-col gap-1.5">
                             <input
                                 value={item.name}
                                 onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, name: e.target.value } : pi))}
                                 placeholder="品名"
-                                className="w-full bg-transparent border-none font-bold text-slate-800 outline-none"
+                                className="w-full bg-transparent border-b border-transparent focus:border-blue-300 font-bold text-slate-800 outline-none transition-colors"
                             />
+                            <div className="grid grid-cols-2 gap-2">
+                                <input
+                                    value={item.manufacturer || ''}
+                                    onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, manufacturer: e.target.value } : pi))}
+                                    placeholder="メーカー"
+                                    className="text-[10px] bg-white/50 border border-slate-200 rounded px-1.5 py-0.5 outline-none focus:border-blue-400"
+                                />
+                                <input
+                                    value={item.model || ''}
+                                    onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, model: e.target.value } : pi))}
+                                    placeholder="型式"
+                                    className="text-[10px] bg-white/50 border border-slate-200 rounded px-1.5 py-0.5 outline-none focus:border-blue-400"
+                                />
+                                <input
+                                    value={item.dimensions || ''}
+                                    onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, dimensions: e.target.value } : pi))}
+                                    placeholder="寸法"
+                                    className="col-span-2 text-[10px] bg-white/50 border border-slate-200 rounded px-1.5 py-0.5 outline-none focus:border-blue-400"
+                                />
+                            </div>
                             <div className="flex items-center gap-1 mt-1">
                                 <span className="px-1.5 py-0.5 bg-slate-100 text-[8px] font-black text-slate-400 rounded border border-slate-200">自由入力</span>
                                 {!item.id.startsWith('registered-') && (
@@ -578,6 +598,7 @@ export const SlipManager: React.FC<{
             id: generateId(),
             category: '消耗品・雑材',
             name: '',
+            manufacturer: '',
             model: '',
             dimensions: '',
             quantity: 1,
