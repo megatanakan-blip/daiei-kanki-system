@@ -184,25 +184,52 @@ const expandSearchTerms = (text: string): string[] => {
   return Array.from(terms);
 };
 
-// 資材をスマートフィルタリング：関連資材は全件、無関係なものは50件補完
+// 資材をスマートフィルタリング：関連資材を最大限拾い、無関係なものは少量補完
 const buildSmartKnowledgeBase = (masterItems: Material[], messages: any[]) => {
   const lastUserMsg = [...messages].reverse().find((m: any) => m.role === 'user');
   const userText = lastUserMsg?.parts?.[0]?.text || '';
   const searchTerms = expandSearchTerms(userText);
 
-  const matched: Material[] = [];
-  const others: Material[] = [];
+  const scored: { item: Material; score: number }[] = [];
+  const matchedCategories = new Set<string>();
 
   for (const item of masterItems) {
     const haystack = [item.name, item.model, item.dimensions, item.category, item.notes]
       .join(' ').toLowerCase();
-    const score = searchTerms.reduce((s, term) => s + (haystack.includes(term) ? 1 : 0), 0);
-    if (score > 0) matched.push(item);
-    else others.push(item);
+
+    let score = 0;
+    for (const term of searchTerms) {
+      if (haystack.includes(term)) {
+        score += term.length; // 長い単語のヒットを重視
+        if (item.category) matchedCategories.add(item.category);
+      }
+    }
+
+    if (score > 0) {
+      scored.push({ item, score });
+    }
   }
 
-  // 関連資材は全件 + 無関係なものは先頭50件を補完（文脈維持のため）
-  const combined = [...matched, ...others.slice(0, 50)];
+  // ヒットしたカテゴリの他のアイテムも「準関連」として少し追加する（キーワード漏れ対策）
+  const categoryFollowers: Material[] = [];
+  if (matchedCategories.size > 0) {
+    for (const item of masterItems) {
+      if (matchedCategories.has(item.category || '') && !scored.some(s => s.item.id === item.id)) {
+        categoryFollowers.push(item);
+      }
+    }
+  }
+
+  // スコア順にソート
+  scored.sort((a, b) => b.score - a.score);
+
+  // 1. スコアあり (全件) + 2. 同カテゴリ他商品 (最大100件) + 3. その他 (20件)
+  const combined = [
+    ...scored.map(s => s.item),
+    ...categoryFollowers.slice(0, 100),
+    ...masterItems.filter(i => !scored.some(s => s.item.id === i.id) && !categoryFollowers.some(cf => cf.id === i.id)).slice(0, 20)
+  ];
+
   return combined.map(i => ({
     id: i.id, n: i.name, m: i.model, d: i.dimensions, p: i.sellingPrice, c: i.category
   }));
@@ -229,7 +256,12 @@ export const chatWithTakahashi = async (messages: any[], masterItems: Material[]
     ${domainKnowledge}
 
     【行動指針】
-    1. **現場用語→正式名称の変換（この道50年の知識）**:
+    1. **「ありません」は禁句（この道50年の意地）**:
+       - ユーザーが言う資材が、あなたの知識（knowledgeBase）に少しでも似たものがあれば、必ず「これのことかい？」と提案してください。
+       - **絶対に「ありません」と言って話を終わらせないでください。** プロとして、代替案や近い仕様のものを探し出すのがあなたの仕事です。
+       - 特に「エル」→「90L」、「ティー」→「チーズ」、「白管」→「白SGP」など、現場用語からの読み替えは瞬時に行って提案してください。
+
+    2. **現場用語→正式名称の変換**:
        - 「エル」「エルボ」→「90L」「90°L」「L」「LD」「LS」などを検索
        - 「ティー」「ティ」→「チーズ」「T」「TJ」を検索
        - 「白ガス管」「白管」→「白SGP」「SGP白」を検索
@@ -237,10 +269,12 @@ export const chatWithTakahashi = async (messages: any[], masterItems: Material[]
        - 「モルコ管」「モルコ」→「SU」「SUS」「ステンレス配管」を検索
        - 「パイレン」→「パイプレンチ」を検索
        - 「全ねじ」「寸切り」→「寸切りボルト」「全ネジ」を検索
-       - 「ソケ」→「ソケット」を検索
-       - 「ニプ」→「ニップル」を検索
-       - **絶対に「ありません」と言う前に、関連する全ての表記バリエーションで在庫リストを確認すること！**
-       - 在庫リスト（knowledgeBase）に商品がある場合はIDを必ず使用する。
+       - 「ソケ」→「ソケット」、「ニプ」→「ニップル」を検索
+       - **知識リスト（knowledgeBase）に商品がある場合はIDを必ず使用する。**
+
+    3. **提案の仕方**:
+       - 曖昧な指定の場合は、「もしかしてこの[品名]のことかい？」と具体的に型番やサイズを挙げて確認してください。
+       - 複数候補があるなら「いくつかあるけど、どっちのサイズだい？」と親身に聞いてください。
 
     2. **トラブルシューティング**:
        - ユーザーが「ダイキンのU0が出た」と言ったら、即座に「ガス欠（冷媒不足）の可能性がありますね。配管のガス漏れチェックが必要かもしれません」と回答してください。
