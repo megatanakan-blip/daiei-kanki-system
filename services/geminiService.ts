@@ -120,12 +120,98 @@ export const parseOrderMemo = async (file: File): Promise<any> => {
   }
 };
 
-export const chatWithTakahashi = async (messages: any[], masterItems: Material[], screenContext: string = "TOP") => {
-  const ai = getAi();
-  // 在庫情報をコンパクトにまとめてAIに渡す（トークン節約と精度向上のため）
-  const knowledgeBase = masterItems.slice(0, 150).map(i => ({
+// 業界用語シノニム辞書（現場用語 → 検索キーワード群）
+const INDUSTRY_SYNONYMS: Record<string, string[]> = {
+  // エルボ・曲管系
+  'エルボ': ['エルボ', 'エル', 'elbow', 'el', '90l', '90°l', '90＿l', '45l', '45°l', 'LD', 'LS', 'LL', '曲管', 'エルボー'],
+  'エル': ['エルボ', 'エル', '90L', '90°L', 'L', 'LL', 'LS', 'LD', 'エルボー', '曲管'],
+  // チーズ・三叉管系
+  'チーズ': ['チーズ', 'ティー', 'tee', 'tj', 'ts', 'tl', 'T管', '三叉', '分岐'],
+  'ティー': ['チーズ', 'T', 'TJ', 'TS', 'TL', 'ティ', '三叉', '分岐'],
+  'ティ': ['チーズ', 'T', 'TJ', 'TS', '三叉'],
+  // ソケット系
+  'ソケット': ['ソケット', 'socket', 'sk', 'S', '継手'],
+  // ニップル系
+  'ニップル': ['ニップル', 'nipple', 'np', 'NI'],
+  // ユニオン系
+  'ユニオン': ['ユニオン', 'union', 'un'],
+  // フランジ系
+  'フランジ': ['フランジ', 'flange', 'fl', 'FF', 'RF'],
+  // バルブ系
+  'バルブ': ['バルブ', 'valve', 'VLV', 'V'],
+  'ゲートバルブ': ['ゲートバルブ', 'gate', 'GV', 'ゲート'],
+  'ボールバルブ': ['ボールバルブ', 'ball', 'BV', 'ボール'],
+  'グローブバルブ': ['グローブバルブ', 'globe', 'GLV', 'グローブ'],
+  'チェックバルブ': ['チェックバルブ', 'check', 'CV', 'チェック', '逆止'],
+  // キャップ・プラグ
+  'キャップ': ['キャップ', 'cap', 'CP', '盲'],
+  'プラグ': ['プラグ', 'plug', 'PL'],
+  // レジューサー・異径系
+  'レジューサー': ['レジューサー', 'reducer', 'RD', 'レデューサ', '異径'],
+  // 錢管系（白ガス・黒管・白管）
+  '黒管': ['黒管', '黒SGP', 'SGP黒', '配管用炭素鉰鈴管', 'SGP', 'ガス管', 'GP'],
+  '白管': ['白管', '白SGP', 'SGP白', '白ガス管', 'フ■'],
+  '白ガス管': ['白SGP', 'SGP白', '白管', 'ガス管', 'SGP'],
+  'SGP': ['SGP', '黒管', '白管', '配管用炭素鉰鈴管', 'ガス管'],
+  // ステンレス系（モルコ管など）
+  'モルコ管': ['SU', 'SUS', 'ステンレス', 'モルコ', 'SA', 'SUS配管'],
+  'モルコ': ['SU', 'SUS', 'ステンレス', 'モルコ管'],
+  'SUS': ['SUS', 'SU', 'ステンレス', 'stainless', 'SA', 'モルコ管'],
+  // 塩ビ系
+  'VP': ['VP', '塩ビ', '塩化ビニル', 'PVC'],
+  'VU': ['VU', '薄肉塩ビ', '排水用'],
+  'HI': ['HI', '耳衝撃', '強化塩ビ'],
+  // ポリ系
+  'PE': ['PE', 'ポリ', 'ポリエチレン'],
+  'PP': ['PP', 'ポリプロ', 'ポリプロピレン'],
+  // 工具系
+  'パイレン': ['パイプレンチ', 'パイレン'],
+  '全ねじ': ['全ねじ', '寸切り', '寸切', '全ネジ'],
+  'バンド': ['バンド', 'ハンガー', '吹り', '吹バンド', '吹りバンド'],
+};
+
+// ユーザーの発言から検索キーワードを業界用語シノニムで展開する
+const expandSearchTerms = (text: string): string[] => {
+  const lower = text.toLowerCase();
+  const terms = new Set<string>([lower]);
+  for (const [key, synonyms] of Object.entries(INDUSTRY_SYNONYMS)) {
+    const allVariants = [key.toLowerCase(), ...synonyms.map(s => s.toLowerCase())];
+    if (allVariants.some(v => lower.includes(v))) {
+      synonyms.forEach(s => terms.add(s.toLowerCase()));
+      terms.add(key.toLowerCase());
+    }
+  }
+  return Array.from(terms);
+};
+
+// 資材をスマートフィルタリング：関連資材は全件、無関係なものは50件補完
+const buildSmartKnowledgeBase = (masterItems: Material[], messages: any[]) => {
+  const lastUserMsg = [...messages].reverse().find((m: any) => m.role === 'user');
+  const userText = lastUserMsg?.parts?.[0]?.text || '';
+  const searchTerms = expandSearchTerms(userText);
+
+  const matched: Material[] = [];
+  const others: Material[] = [];
+
+  for (const item of masterItems) {
+    const haystack = [item.name, item.model, item.dimensions, item.category, item.notes]
+      .join(' ').toLowerCase();
+    const score = searchTerms.reduce((s, term) => s + (haystack.includes(term) ? 1 : 0), 0);
+    if (score > 0) matched.push(item);
+    else others.push(item);
+  }
+
+  // 関連資材は全件 + 無関係なものは先頭50件を補完（文脈維持のため）
+  const combined = [...matched, ...others.slice(0, 50)];
+  return combined.map(i => ({
     id: i.id, n: i.name, m: i.model, d: i.dimensions, p: i.sellingPrice, c: i.category
   }));
+};
+
+export const chatWithTakahashi = async (messages: any[], masterItems: Material[], screenContext: string = "TOP") => {
+  const ai = getAi();
+  // スマートフィルタリング：関連資材は全件 + 無関係50件を補完
+  const knowledgeBase = buildSmartKnowledgeBase(masterItems, messages);
 
   const systemInstruction = `
     你是帯広的設備資材专家「AI高橋さん」。
@@ -143,9 +229,18 @@ export const chatWithTakahashi = async (messages: any[], masterItems: Material[]
     ${domainKnowledge}
 
     【行動指針】
-    1. **専門用語の解釈**:
-       - ユーザーが「SGPの50A」と言ったら、「配管用炭素鋼鋼管 50A」と解釈してください。
-       - 「パイレン」は「パイプレンチ」、「全ねじ」は「寸切りボルト」など、現場用語を正確に標準名称に変換・理解してください。
+    1. **現場用語→正式名称の変換（この道50年の知識）**:
+       - 「エル」「エルボ」→「90L」「90°L」「L」「LD」「LS」などを検索
+       - 「ティー」「ティ」→「チーズ」「T」「TJ」を検索
+       - 「白ガス管」「白管」→「白SGP」「SGP白」を検索
+       - 「黒管」「黒ガス管」→「黒SGP」「SGP黒」「配管用炭素鋼鋼管」を検索
+       - 「モルコ管」「モルコ」→「SU」「SUS」「ステンレス配管」を検索
+       - 「パイレン」→「パイプレンチ」を検索
+       - 「全ねじ」「寸切り」→「寸切りボルト」「全ネジ」を検索
+       - 「ソケ」→「ソケット」を検索
+       - 「ニプ」→「ニップル」を検索
+       - **絶対に「ありません」と言う前に、関連する全ての表記バリエーションで在庫リストを確認すること！**
+       - 在庫リスト（knowledgeBase）に商品がある場合はIDを必ず使用する。
 
     2. **トラブルシューティング**:
        - ユーザーが「ダイキンのU0が出た」と言ったら、即座に「ガス欠（冷媒不足）の可能性がありますね。配管のガス漏れチェックが必要かもしれません」と回答してください。
