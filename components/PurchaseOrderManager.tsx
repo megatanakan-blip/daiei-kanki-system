@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { ShoppingCart, Plus, X, Search, FileText, Printer, Trash2, Edit3, Save, CheckCircle2, Package, AlertTriangle } from 'lucide-react';
 import { PurchaseOrder, MaterialItem, AppSettings, PurchaseOrderItem } from '../types';
 import * as storage from '../services/firebaseService';
+import { normalizeForSearch, filterAndSortItems } from '../services/searchUtils';
 
 interface PurchaseOrderManagerProps {
     masterItems: MaterialItem[];
@@ -26,13 +27,7 @@ export const PurchaseOrderManager: React.FC<PurchaseOrderManagerProps> = ({ mast
 
     const suggestions = useMemo(() => {
         if (suggestionIdx === null) return [];
-        const q = query.trim().toLowerCase();
-        if (!q) return masterItems.slice(0, 10); // Show top items on focus even if empty
-        const keywords = q.split(/[\s\u3000]+/).filter(k => k.length > 0);
-        return masterItems.filter(i => {
-            const text = `${i.name} ${i.model || ''} ${i.dimensions || ''}`.toLowerCase();
-            return keywords.every(k => text.includes(k));
-        }).slice(0, 10);
+        return filterAndSortItems(masterItems, query).slice(0, 30);
     }, [query, masterItems, suggestionIdx]);
 
     const handleSelect = (idx: number, item: MaterialItem) => {

@@ -173,10 +173,14 @@ const INDUSTRY_SYNONYMS: Record<string, string[]> = {
 // ユーザーの発言から検索キーワードを業界用語シノニムで展開する
 const expandSearchTerms = (text: string): string[] => {
   const lower = text.toLowerCase();
-  const terms = new Set<string>([lower]);
+  // スペースや記号で分割して単語リストを作成
+  const words = lower.split(/[\s　,，、。．.!:：;；<>「」『』（）()[\]【】]/).filter(w => w.length > 0);
+  const terms = new Set<string>([...words, lower]);
+
   for (const [key, synonyms] of Object.entries(INDUSTRY_SYNONYMS)) {
     const allVariants = [key.toLowerCase(), ...synonyms.map(s => s.toLowerCase())];
-    if (allVariants.some(v => lower.includes(v))) {
+    // ユーザーの入力全体、または分割された単語のいずれかがシノニムに含まれるかチェック
+    if (allVariants.some(v => lower.includes(v) || words.some(w => v.includes(w) || w.includes(v)))) {
       synonyms.forEach(s => terms.add(s.toLowerCase()));
       terms.add(key.toLowerCase());
     }
@@ -223,15 +227,24 @@ const buildSmartKnowledgeBase = (masterItems: Material[], messages: any[]) => {
   // スコア順にソート
   scored.sort((a, b) => b.score - a.score);
 
-  // 1. スコアあり (全件) + 2. 同カテゴリ他商品 (最大100件) + 3. その他 (20件)
+  // 1. スコアあり (全件) + 2. 同カテゴリ他商品 (最大150件) + 3. その他 (50件)
+  // 画像がある場合は、より広範囲にアイテムを含める（解析漏れ対策）
+  const hasImage = messages.some(m => m.parts.some((p: any) => p.inlineData));
   const combined = [
     ...scored.map(s => s.item),
-    ...categoryFollowers.slice(0, 100),
-    ...masterItems.filter(i => !scored.some(s => s.item.id === i.id) && !categoryFollowers.some(cf => cf.id === i.id)).slice(0, 20)
+    ...categoryFollowers.slice(0, 150),
+    ...masterItems.filter(i => !scored.some(s => s.item.id === i.id) && !categoryFollowers.some(cf => cf.id === i.id)).slice(0, hasImage ? 100 : 50)
   ];
 
   return combined.map(i => ({
-    id: i.id, n: i.name, m: i.model, d: i.dimensions, p: i.sellingPrice, c: i.category
+    id: i.id,
+    name: i.name,
+    model: i.model,
+    dims: i.dimensions,
+    price: i.sellingPrice,
+    cost: i.costPrice,
+    unit: i.unit,
+    cat: i.category
   }));
 };
 
@@ -270,7 +283,7 @@ export const chatWithTakahashi = async (messages: any[], masterItems: Material[]
        - 「パイレン」→「パイプレンチ」を検索
        - 「全ねじ」「寸切り」→「寸切りボルト」「全ネジ」を検索
        - 「ソケ」→「ソケット」、「ニプ」→「ニップル」を検索
-       - **知識リスト（knowledgeBase）に商品がある場合はIDを必ず使用する。**
+       - **知識リスト（knowledgeBase）に商品がある場合はIDを必ず使用する。ただし、このIDは[ACTION]コマンド内でのみ使用し、ユーザーへの返信テキスト（説明文）には絶対に含めないでください。IDをユーザーに見せるのは非常に不格好で失礼にあたります。**
 
     3. **提案の仕方**:
        - 曖昧な指定の場合は、「もしかしてこの[品名]のことかい？」と具体的に型番やサイズを挙げて確認してください。
@@ -312,6 +325,7 @@ export const chatWithTakahashi = async (messages: any[], masterItems: Material[]
     - 情報更新: [[ACTION:UPDATE_INFO:{"customerName":"顧客名","siteName":"現場名"}]]
 
     【あなたの知識（在庫リスト）】
+    ※以下のJSONリスト内のidはシステム管理用です。ユーザーへの返信にはname, model, dimsなどを使用し、idは[ACTION]内でのみ使用してください。
     ${JSON.stringify(knowledgeBase)}
   `;
 

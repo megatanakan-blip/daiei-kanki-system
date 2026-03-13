@@ -4,6 +4,7 @@ import { Estimate, EstimateStatus, Customer, MaterialItem, SlipItem, AppSettings
 import { X, Printer, Search, FileText, Trash2, CheckCircle2, XCircle, Clock, ChevronRight, Loader2, Calendar, User, MapPin, Edit3, Plus, Minus, Save, RotateCcw, Camera, Sparkles, ShoppingCart, Mail, GripVertical } from 'lucide-react';
 import * as storage from '../services/firebaseService';
 import { parseOrderMemo } from '../services/geminiService';
+import { normalizeForSearch, filterAndSortItems } from '../services/searchUtils';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 
 const DEFAULT_COMPANY_INFO: AppSettings = {
@@ -454,11 +455,7 @@ const EstimateEditPanel = React.memo(({
 
   const suggestions = useMemo(() => {
     if (!query.trim() || suggestionIdx === null) return [];
-    const keywords = query.toLowerCase().split(/[\s\u3000]+/).filter(k => k.length > 0);
-    return masterItems.filter(i => {
-      const text = `${i.name} ${i.model || ''} ${i.dimensions || ''}`.toLowerCase();
-      return keywords.every(k => text.includes(k));
-    }).slice(0, 8);
+    return filterAndSortItems(masterItems, query).slice(0, 30);
   }, [query, masterItems, suggestionIdx]);
 
   const handleSelect = useCallback((idx: number, item: MaterialItem) => {

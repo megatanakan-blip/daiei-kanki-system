@@ -5,6 +5,7 @@ import { Slip, SlipItem, SlipType, DeliveryTime, DeliveryDestination, MaterialIt
 import { X, Trash2, Printer, FileText, ShoppingCart, Save, HardHat, Loader2, Edit3, FileOutput, CheckSquare, Square, Search, MapPin, Clock, Users, Info, RotateCcw, AlertTriangle, ArrowRight, Package, Layers, Check, Calculator, History, Archive, FileStack, ChevronDown, ChevronRight, Building2, Eye, EyeOff, Calendar, User, UserCheck, Camera, Sparkles, Plus, Minus, MessageSquare, Edit2, LayoutGrid, FileSearch, Database, Mail, GripVertical } from 'lucide-react';
 import * as storage from '../services/firebaseService';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
+import { normalizeForSearch, filterAndSortItems } from '../services/searchUtils';
 
 import { AppSettings } from '../types';
 
@@ -580,12 +581,7 @@ export const SlipManager: React.FC<{
 
     const itemSuggestions = useMemo(() => {
         if (!itemSearchQuery.trim()) return [];
-        const keywords = itemSearchQuery.toLowerCase().split(/[\s\u3000]+/).filter(k => k.length > 0);
-        if (keywords.length === 0) return [];
-        return masterItems.filter((i: MaterialItem) => {
-            const searchableText = `${i.name} ${i.model || ''} ${i.dimensions || ''}`.toLowerCase();
-            return keywords.every(keyword => searchableText.includes(keyword));
-        }).slice(0, 12);
+        return filterAndSortItems(masterItems, itemSearchQuery).slice(0, 30);
     }, [itemSearchQuery, masterItems]);
 
     const handleAddFromMaster = (item: MaterialItem) => {

@@ -16,6 +16,7 @@ import { AITakahashi } from './components/AITakahashi';
 import { LinkUserManagement } from './components/LinkUserManagement';
 import { generateMaterialsFromFile } from './services/geminiService';
 import * as storage from './services/firebaseService';
+import { normalizeForSearch, filterAndSortItems } from './services/searchUtils';
 
 const App: React.FC = () => {
     const [items, setItems] = useState<MaterialItem[]>([]);
@@ -381,13 +382,7 @@ const App: React.FC = () => {
                         </div>
                         <div className="flex-1 overflow-hidden flex flex-col p-8">
                             <MaterialTable
-                                items={items.filter(i => {
-                                    const normalizeText = (t: string) => t.replace(/　/g, ' ').trim().toLowerCase();
-                                    const keywords = normalizeText(searchQuery).split(' ').filter(k => k.length > 0);
-                                    if (keywords.length === 0) return true;
-                                    const haystack = normalizeText(`${i.name} ${i.model} ${i.dimensions} ${i.manufacturer ?? ''}`);
-                                    return keywords.every(k => haystack.includes(k));
-                                })}
+                                items={filterAndSortItems(items, searchQuery)}
                                 pricingRules={pricingRules} customers={customers} activeCustomer={activeCustomer} activeSite={activeSite}
                                 onCustomerChange={(name) => { setActiveCustomer(name); setActiveSite(null); }} onSiteChange={setActiveSite}
                                 onEdit={item => { setEditingItem(item); setIsFormOpen(true); }} onDelete={id => window.confirm('削除しますか？') && storage.deleteMaterial(id)}
