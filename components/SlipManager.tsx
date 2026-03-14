@@ -762,11 +762,12 @@ export const SlipManager: React.FC<{
                 slipNumber: confirmingOutbound.slipNumber,
                 createdAt: Date.now(),
                 issuerPerson: issuer,
-                isClosed: true
+                isClosed: true,
+                isHandled: true // Sync correctly back to LINK so the order is marked completed
             };
 
             await storage.addSlip(cleanForFirestore(provSlip));
-            if (confirmingOutbound.id) await storage.updateSlip(confirmingOutbound.id, { isClosed: true });
+            if (confirmingOutbound.id) await storage.updateSlip(confirmingOutbound.id, { isClosed: true, isHandled: true });
 
             if (missingItems.length > 0) {
                 const rs: Omit<Slip, 'id'> = {
