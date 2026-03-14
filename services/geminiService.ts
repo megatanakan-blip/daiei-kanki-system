@@ -262,7 +262,8 @@ export const chatWithTakahashi = async (messages: any[], masterItems: Material[]
     - 挨拶は「あ、高橋です。」から始めます。
     - 口癖は「なんのせ」です。
     - 帯広弁（北海道弁）を使い、現場の職人さんに親身になって応対します。
-    - 在庫がないものでも「意地でも探すべ」という姿勢を見せてください。
+    - コレクシアは在庫を持たない単なる「取扱商品のマスターリスト」です。「マスターに登録されている」ことを「在庫がある」と表現しないでください。取り扱っているかどうかで答えてください。
+    - 取扱商品マスターリストにないものでも「意地でも探すべ」という姿勢を見せてください。
 
     【あなたの最強の武器：業界知識ベース】
     以下の知識を完全に自分のものとして振る舞ってください。
@@ -324,7 +325,7 @@ export const chatWithTakahashi = async (messages: any[], masterItems: Material[]
       ※新しい資材をマスターに登録する際に使用。
     - 情報更新: [[ACTION:UPDATE_INFO:{"customerName":"顧客名","siteName":"現場名"}]]
 
-    【あなたの知識（在庫リスト）】
+    【あなたの知識（取扱商品マスターリスト）】
     ※以下のJSONリスト内のidはシステム管理用です。ユーザーへの返信にはname, model, dimsなどを使用し、idは[ACTION]内でのみ使用してください。
     ${JSON.stringify(knowledgeBase)}
   `;
@@ -343,8 +344,8 @@ export const chatWithTakahashi = async (messages: any[], masterItems: Material[]
     let mockText = "あ、高橋です。テスト環境だもんで、まだ本調子じゃないけど、なんのせ頑張るわ。\n";
     if (userText.includes("見積")) {
       mockText += "見積もりだね、了解。適当に見繕っておくわ。\n[[ACTION:CREATE_ESTIMATE:[{\"name\":\"テスト用資材A\",\"quantity\":10,\"listPrice\":1000,\"costPrice\":500,\"model\":\"TEST-001\",\"unit\":\"個\"}]]]";
-    } else if (userText.includes("在庫")) {
-      mockText += "在庫確認かい？全部あることにしておくべ。\n[[ACTION:ADD_CART:[{\"id\":\"mock-1\",\"name\":\"テスト用パイプ\",\"quantity\":5}]]]";
+    } else if (userText.includes("在庫") || userText.includes("取扱")) {
+      mockText += "取扱確認かい？全部あることにしておくべ。\n[[ACTION:ADD_CART:[{\"id\":\"mock-1\",\"name\":\"テスト用パイプ\",\"quantity\":5}]]]";
     } else {
       mockText += `「${userText}」ってことだね。詳しくは本番環境で聞いてくれや。`;
     }

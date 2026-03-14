@@ -258,14 +258,14 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                         </tr>
                     </thead>
                     <tbody>
-                        {Array.from({ length: (isWorkSlip || isDetail || isProvisional || isReturn) ? 16 : 24 }).map((_, idx) => {
+                        {Array.from({ length: 16 }).map((_, idx) => {
                             const item = slip.items?.[idx];
                             const orderedQty = item ? item.quantity : 0;
                             // 出庫作業票(outbound)の場合は、納品数欄を強制的に白抜き(null)にする
                             const deliveredQty = item ? (isWorkSlip ? null : (item.deliveredQuantity ?? item.quantity)) : null;
                             const amount = item ? ((item.appliedPrice || 0) * (item.deliveredQuantity ?? item.quantity)) : 0;
 
-                            const isLastRow = idx === ((isWorkSlip || isDetail || isProvisional || isReturn) ? 15 : 23);
+                            const isLastRow = idx === 15;
                             return (
                                 <tr key={idx} className={`${isLastRow ? '' : 'border-b'} h-[10mm] border-slate-200 ${orderedQty < 0 ? 'bg-red-50 text-red-600 font-bold' : ''}`}>
                                     <td className="text-center border-r">{idx + 1}</td>
@@ -504,7 +504,34 @@ export const SlipManager: React.FC<{
         if (onTabChange) onTabChange(tab);
     };
     const [slips, setSlips] = useState<Slip[]>([]);
-    const [printingSlips, setPrintingSlips] = useState<Slip[]>([]);
+    
+    // Auto-chunk slips > 16 items for printing pagination without modifying internal slip logic
+    const [rawPrintingSlips, setRawPrintingSlips] = useState<Slip[]>([]);
+    const printingSlips = useMemo(() => {
+        const result: Slip[] = [];
+        rawPrintingSlips.forEach(slip => {
+            if (slip.type === 'cover') {
+                result.push(slip);
+                return;
+            }
+            const limit = 16;
+            if (!slip.items || slip.items.length <= limit) {
+                result.push(slip);
+                return;
+            }
+            for (let i = 0; i < slip.items.length; i += limit) {
+                const chunk = slip.items.slice(i, i + limit);
+                result.push({
+                    ...slip,
+                    id: `${slip.id || 'p'}-pg${Math.floor(i/limit) + 1}`,
+                    items: chunk,
+                });
+            }
+        });
+        return result;
+    }, [rawPrintingSlips]);
+    const setPrintingSlips = setRawPrintingSlips;
+
     const [confirmingOutbound, setConfirmingOutbound] = useState<Slip | null>(null);
     const [actualQuantities, setActualQuantities] = useState<Record<string, number>>({});
     const [issuerName, setIssuerName] = useState('');
@@ -831,9 +858,9 @@ export const SlipManager: React.FC<{
             const siteSlipNo = `DET-${targetMonth.replace('-', '')}-${sName.substring(0, 4)}`;
             const baseMeta: any = { customerName: cName, constructionName: sName, totalAmount: sNet, taxAmount: sTax, grandTotal: sNet + sTax, date: new Date().toISOString().slice(0, 10), createdAt: Date.now(), isClosed: true, slipNumber: siteSlipNo };
             allDocs.push({ ...baseMeta, id: 'site-cover-' + sName, type: 'cover' });
-            const deliveryChunks = []; for (let i = 0; i < sItems.length; i += 24) deliveryChunks.push(sItems.slice(i, i + 24));
+            const deliveryChunks = []; for (let i = 0; i < sItems.length; i += 16) deliveryChunks.push(sItems.slice(i, i + 16));
             deliveryChunks.forEach((chunk, pageIdx) => allDocs.push({ ...baseMeta, id: `delivery-${sName}-${pageIdx}`, type: 'delivery', items: chunk, slipNumber: `${siteSlipNo}-D${pageIdx + 1}` }));
-            const invoiceChunks = []; for (let i = 0; i < sItems.length; i += 24) invoiceChunks.push(sItems.slice(i, i + 24));
+            const invoiceChunks = []; for (let i = 0; i < sItems.length; i += 16) invoiceChunks.push(sItems.slice(i, i + 16));
             invoiceChunks.forEach((chunk, pageIdx) => allDocs.push({ ...baseMeta, id: `invoice-${sName}-${pageIdx}`, type: 'invoice', items: chunk, slipNumber: `${siteSlipNo}-I${pageIdx + 1}` }));
         });
         setPrintingSlips(allDocs);
