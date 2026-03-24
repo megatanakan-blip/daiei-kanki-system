@@ -212,44 +212,63 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                     <div className="flex flex-col flex-grow gap-4 min-h-0">
                         {/* 請求内訳テーブル */}
                         <div className="w-full shrink-0">
-                            <table className="w-full border-collapse border-b-2 border-slate-900 border-x-2 border-t text-[10px]">
-                                <thead>
-                                    <tr className="bg-slate-50 border-b border-slate-900">
-                                        <th className="py-1 px-2 border-r border-slate-400 text-center font-bold w-[16%] text-[9px]">前回御請求額</th>
-                                        <th className="py-1 px-2 border-r border-slate-400 text-center font-bold w-[16%] text-[9px]">今回御入金額</th>
-                                        <th className="py-1 px-2 border-r border-slate-400 text-center font-bold w-[16%] text-[9px]">繰越残高</th>
-                                        <th className="py-1 px-2 border-r border-slate-400 text-center font-bold w-[18%] text-[9px]">今回売上額(税抜)</th>
-                                        <th className="py-1 px-2 border-r border-slate-400 text-center font-bold w-[14%] text-[9px]">消費税(10%)</th>
-                                        <th className="py-1 px-2 text-center font-bold w-[20%] bg-slate-900 text-white text-[9px]">今回御請求額</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr className="h-10 text-center text-sm font-mono font-bold">
-                                        <td className="border-r border-slate-300 px-1 relative">
-                                            <input
-                                                type="number"
-                                                value={prevAmt}
-                                                onChange={(e) => onUpdateSlip?.({ previousBillingAmount: parseInt(e.target.value) || 0 })}
-                                                className="w-full text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-1 print:hidden"
-                                            />
-                                            <span className="hidden print:block">¥{prevAmt.toLocaleString()}</span>
-                                        </td>
-                                        <td className="border-r border-slate-300 px-1 relative">
-                                            <input
-                                                type="number"
-                                                value={payRec}
-                                                onChange={(e) => onUpdateSlip?.({ paymentReceived: parseInt(e.target.value) || 0 })}
-                                                className="w-full text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-1 print:hidden"
-                                            />
-                                            <span className="hidden print:block">¥{payRec.toLocaleString()}</span>
-                                        </td>
-                                        <td className="border-r border-slate-300">¥{carriedForward.toLocaleString()}</td>
-                                        <td className="border-r border-slate-300">¥{currentSales.toLocaleString()}</td>
-                                        <td className="border-r border-slate-300">¥{currentTax.toLocaleString()}</td>
-                                        <td className="bg-slate-50 text-base font-black border-slate-900 border-l-2">¥{currentGrandTotal.toLocaleString()}-</td>
-                                    </tr>
-                                </tbody>
-                            </table>
+                            {isGlobal ? (
+                                <table className="w-full border-collapse border-b-2 border-slate-900 border-x-2 border-t text-[10px]">
+                                    <thead>
+                                        <tr className="bg-slate-50 border-b border-slate-900">
+                                            <th className="py-1 px-2 border-r border-slate-400 text-center font-bold w-[16%] text-[9px]">前回御請求額</th>
+                                            <th className="py-1 px-2 border-r border-slate-400 text-center font-bold w-[16%] text-[9px]">今回御入金額</th>
+                                            <th className="py-1 px-2 border-r border-slate-400 text-center font-bold w-[16%] text-[9px]">繰越残高</th>
+                                            <th className="py-1 px-2 border-r border-slate-400 text-center font-bold w-[18%] text-[9px]">今回売上額(税抜)</th>
+                                            <th className="py-1 px-2 border-r border-slate-400 text-center font-bold w-[14%] text-[9px]">消費税(10%)</th>
+                                            <th className="py-1 px-2 text-center font-bold w-[20%] bg-slate-900 text-white text-[9px]">今回御請求額</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr className="h-10 text-center text-sm font-mono font-bold">
+                                            <td className="border-r border-slate-300 px-1 relative">
+                                                <input
+                                                    type="number"
+                                                    value={prevAmt}
+                                                    onChange={(e) => onUpdateSlip?.({ previousBillingAmount: parseInt(e.target.value) || 0 })}
+                                                    className="w-full text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-1 print:hidden"
+                                                />
+                                                <span className="hidden print:block">¥{prevAmt.toLocaleString()}</span>
+                                            </td>
+                                            <td className="border-r border-slate-300 px-1 relative">
+                                                <input
+                                                    type="number"
+                                                    value={payRec}
+                                                    onChange={(e) => onUpdateSlip?.({ paymentReceived: parseInt(e.target.value) || 0 })}
+                                                    className="w-full text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-1 print:hidden"
+                                                />
+                                                <span className="hidden print:block">¥{payRec.toLocaleString()}</span>
+                                            </td>
+                                            <td className="border-r border-slate-300">¥{carriedForward.toLocaleString()}</td>
+                                            <td className="border-r border-slate-300">¥{currentSales.toLocaleString()}</td>
+                                            <td className="border-r border-slate-300">¥{currentTax.toLocaleString()}</td>
+                                            <td className="bg-slate-50 text-base font-black border-slate-900 border-l-2">¥{currentGrandTotal.toLocaleString()}-</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            ) : (
+                                <div className="flex justify-center py-6">
+                                    <table className="w-[50%] border-collapse border-b-4 border-slate-900 border-x-2 border-t">
+                                        <thead>
+                                            <tr className="bg-slate-900 text-white">
+                                                <th className="py-2 px-4 text-center font-bold text-[11px] tracking-widest">今回売上額 (税抜) / Monthly Sales Excl. Tax</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr className="h-16 text-center">
+                                                <td className="text-3xl font-mono font-black text-slate-900">
+                                                    ¥{currentSales.toLocaleString()}-
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
                         </div>
                         {isGlobal && slip.siteSummaries && (
                             <div className="border rounded-xl overflow-hidden shadow-sm bg-white flex flex-col flex-grow max-h-[480px]">
@@ -266,17 +285,23 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                         )}
                         <div className="mt-auto pt-4 border-t border-slate-200 shrink-0 flex justify-between items-end gap-8">
                             <div className="flex-grow">
-                                <div className="font-bold text-slate-600 underline decoration-slate-300 mb-2 text-[10px]">【振込先】</div>
-                                <div className="grid grid-cols-1 gap-y-1.5 text-[10px]">
-                                    {(info.banks || []).map((bank, idx) => (
-                                        <div key={idx} className="flex items-center border-b border-slate-100 pb-1">
-                                            <div className="flex flex-col">
-                                                <span className="font-bold whitespace-nowrap">{bank.bankName} {bank.branchName}</span>
-                                                <span className="font-mono text-slate-600">{bank.accountType} {bank.accountNumber} {bank.accountHolder}</span>
-                                            </div>
+                                {isGlobal ? (
+                                    <>
+                                        <div className="font-bold text-slate-600 underline decoration-slate-300 mb-2 text-[10px]">【振込先】</div>
+                                        <div className="grid grid-cols-1 gap-y-1.5 text-[10px]">
+                                            {(info.banks || []).map((bank, idx) => (
+                                                <div key={idx} className="flex items-center border-b border-slate-100 pb-1">
+                                                    <div className="flex flex-col">
+                                                        <span className="font-bold whitespace-nowrap">{bank.bankName} {bank.branchName}</span>
+                                                        <span className="font-mono text-slate-600">{bank.accountType} {bank.accountNumber} {bank.accountHolder}</span>
+                                                    </div>
+                                                </div>
+                                            ))}
                                         </div>
-                                    ))}
-                                </div>
+                                    </>
+                                ) : (
+                                    <div className="h-20"></div> // Spacer for site cover
+                                )}
                             </div>
                             {isGlobal && (
                                 <table className="border-collapse border border-slate-900 w-48 text-[9px] shrink-0 mb-1">
