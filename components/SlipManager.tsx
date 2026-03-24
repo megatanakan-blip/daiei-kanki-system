@@ -771,7 +771,8 @@ export const SlipManager: React.FC<{
         }>();
 
         slips.forEach(s => {
-            if (s.customerName === customerName && s.constructionName === siteName) {
+            // 現在編集中の伝票は実績計算から除外して、過剰返品チェックの二重カウントを防ぐ
+            if (s.customerName === customerName && s.constructionName === siteName && s.id !== editingSlipId) {
                 const month = s.date.slice(0, 7); // YYYY-MM
                 if (s.type === 'provisional' || s.type === 'delivery') {
                     s.items.forEach(item => {
@@ -899,7 +900,9 @@ export const SlipManager: React.FC<{
         setIsSaving(true);
         try {
             const processedItems = cart.map((i: SlipItem) => {
-                const qty = activeMode === 'return' ? -Math.abs(i.quantity) : i.quantity;
+                // Ensure returns stay negative only if they are not intentionally positive (like fees)
+                // Use i.quantity as-is to allow user flexibility in post-edit scenarios
+                const qty = i.quantity;
                 return { ...i, quantity: qty, deliveredQuantity: qty, date: slipDate };
             });
 
@@ -1556,7 +1559,7 @@ export const SlipManager: React.FC<{
                                                                         <button onClick={() => { setPrintingSlips([sl]); }} className="p-2.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all" title="再印刷">
                                                                             <Printer size={18} />
                                                                         </button>
-                                                                        {sl.type === 'provisional' && (
+                                                                        {(sl.type === 'provisional' || sl.type === 'return') && (
                                                                             <button onClick={() => handleEditSlip(sl)} className="p-2.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-xl transition-all" title="修正">
                                                                                 <Edit3 size={18} />
                                                                             </button>
