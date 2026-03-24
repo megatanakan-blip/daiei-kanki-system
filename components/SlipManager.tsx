@@ -6,6 +6,7 @@ import { X, Trash2, Printer, FileText, ShoppingCart, Save, HardHat, Loader2, Edi
 import * as storage from '../services/firebaseService';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { normalizeForSearch, filterAndSortItems } from '../services/searchUtils';
+import { parseReturnMemo } from '../services/geminiService';
 
 import { AppSettings } from '../types';
 
@@ -26,6 +27,93 @@ const DEFAULT_COMPANY_INFO: AppSettings = {
 const generateId = () => {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
     return Math.random().toString(36).substring(2, 11) + Date.now().toString(36);
+};
+
+// 返品の単価・時期選択モーダル
+const ReturnResolutionModal = ({ results, onApply, onClose }: { results: any[], onApply: (items: any[]) => void, onClose: () => void }) => {
+    const [resolutions, setResolutions] = useState<any[]>(results.map(r => ({
+        ...r,
+        selectedItem: r.suggestedItems && r.suggestedItems.length === 1 ? r.suggestedItems[0] : null,
+        confirmedQuantity: r.quantity
+    })));
+
+    const handleSelect = (resultIdx: number, item: any) => {
+        const next = [...resolutions];
+        next[resultIdx].selectedItem = item;
+        setResolutions(next);
+    };
+
+    const isValid = resolutions.every(r => r.selectedItem);
+
+    return (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[250] flex items-center justify-center p-4">
+            <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+                <div className="p-6 border-b flex justify-between items-center bg-rose-50/50">
+                    <div>
+                        <h2 className="text-xl font-black text-rose-900 flex items-center gap-2">
+                            <Sparkles className="text-rose-500" /> 返品単価・時期の最終確認
+                        </h2>
+                        <p className="text-[10px] text-rose-600 font-bold mt-1 uppercase tracking-widest">Select relevant delivery records</p>
+                    </div>
+                    <button onClick={onClose} className="p-2 hover:bg-rose-100 rounded-xl transition-all"><X size={24} /></button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/30">
+                    {resolutions.map((res, idx) => (
+                        <div key={idx} className="bg-white rounded-2xl p-5 border shadow-sm">
+                            <div className="flex justify-between items-start mb-4">
+                                <div>
+                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">手書き解析結果:</span>
+                                    <div className="text-base font-black text-slate-800">{res.originalText} <span className="text-rose-600 ml-2">数量: {res.quantity}</span></div>
+                                </div>
+                                {res.selectedItem && <div className="bg-emerald-500 text-white text-[8px] px-2 py-1 rounded-full font-black animate-pulse">MATCHED</div>}
+                            </div>
+
+                            {res.suggestedItems && res.suggestedItems.length > 0 ? (
+                                <div className="space-y-2">
+                                    <p className="text-[10px] font-black text-slate-400 mb-2 uppercase tracking-tighter">納品履歴から一つ選択してください:</p>
+                                    <div className="grid grid-cols-1 gap-2">
+                                        {res.suggestedItems.map((item: any, i: number) => (
+                                            <button
+                                                key={i}
+                                                onClick={() => handleSelect(idx, item)}
+                                                className={`w-full text-left p-4 rounded-xl border-2 transition-all ${res.selectedItem?.id === item.id ? 'border-emerald-500 bg-emerald-50 shadow-inner' : 'border-slate-100 hover:border-rose-200 bg-white'}`}
+                                            >
+                                                <div className="flex justify-between items-center mb-1">
+                                                    <span className="font-black text-sm text-slate-700">{item.date} 納品分</span>
+                                                    <span className="font-mono font-black text-emerald-600">¥{item.price.toLocaleString()}</span>
+                                                </div>
+                                                <div className="text-[10px] text-slate-400 font-bold flex justify-between">
+                                                    <span>{item.name} {item.model}</span>
+                                                    <span>可能残数: {item.maxAvailable}</span>
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="p-4 bg-amber-50 rounded-xl border border-amber-200 text-amber-700 text-xs font-bold flex items-center gap-3">
+                                    <AlertTriangle size={20} />
+                                    履歴に一致する品物が見つかりませんでした。
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+
+                <div className="p-6 border-t bg-white flex gap-3">
+                    <button onClick={onClose} className="flex-1 py-4 bg-slate-100 text-slate-600 font-black rounded-2xl hover:bg-slate-200">閉じる</button>
+                    <button 
+                        onClick={() => onApply(resolutions)}
+                        disabled={!isValid}
+                        className={`flex-[2] py-4 font-black rounded-2xl shadow-xl transition-all ${isValid ? 'bg-rose-600 text-white hover:bg-rose-700 active:scale-95' : 'bg-slate-300 text-white cursor-not-allowed'}`}
+                    >
+                        {resolutions.filter(r => r.selectedItem).length}件を返品リストに追加
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
 };
 
 const generateSlipNumber = () => {
@@ -303,8 +391,9 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                 <div className="mt-auto pt-4 flex justify-between items-end gap-4">
                     <div className="flex-grow">
                         {slip.note && (
-                            <div className="p-2 border border-slate-200 rounded text-[9px] text-slate-500 italic">
-                                備考: {slip.note}
+                            <div className="p-3 border-2 border-slate-300 rounded-[1rem] text-[10px] text-slate-700 min-h-[15mm]">
+                                <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 leading-none">備考 / Memo</div>
+                                <div className="whitespace-pre-wrap leading-relaxed">{slip.note}</div>
                             </div>
                         )}
                     </div>
@@ -393,6 +482,14 @@ const CartItemRow = React.memo(({
     handleRegisterToMaster: (item: SlipItem) => void,
     onDelete: (index: number) => void
 }) => {
+    const isReturn = activeMode === 'return';
+    const historyInfo = (item as any).historyMonth ? {
+        month: (item as any).historyMonth,
+        available: (item as any).availableQuantity
+    } : null;
+
+    const isExceeding = isReturn && historyInfo && Math.abs(item.quantity) > historyInfo.available;
+
     return (
         <Draggable draggableId={item.id} index={index}>
             {(provided, snapshot) => (
@@ -400,16 +497,11 @@ const CartItemRow = React.memo(({
                     ref={provided.innerRef}
                     {...provided.draggableProps}
                     {...provided.dragHandleProps}
-                    className={`group transition-all ${snapshot.isDragging ? 'bg-blue-100 shadow-xl ring-2 ring-blue-500/50 rounded-xl z-50' : 'hover:bg-slate-50'}`}
+                    className={`group transition-all ${snapshot.isDragging ? 'bg-blue-100 shadow-xl' : 'hover:bg-slate-50'} ${isExceeding ? 'bg-rose-50' : ''}`}
                     style={provided.draggableProps.style}
                 >
                     <td className="w-8 text-center">
-                        <div
-                            className="p-1 text-slate-300 hover:text-slate-500 transition-colors cursor-grab active:cursor-grabbing"
-                            title="ドラッグして移動"
-                        >
-                            <GripVertical size={16} />
-                        </div>
+                        <GripVertical size={16} className="text-slate-300 mx-auto" />
                     </td>
                     <td className="py-4">
                         <div className="flex flex-col gap-1.5">
@@ -417,59 +509,76 @@ const CartItemRow = React.memo(({
                                 value={item.name}
                                 onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, name: e.target.value } : pi))}
                                 placeholder="品名"
-                                className="w-full bg-transparent border-b border-transparent focus:border-blue-300 font-bold text-slate-800 outline-none transition-colors"
+                                className={`w-full bg-transparent border-b border-transparent font-bold ${isReturn ? 'text-rose-900' : 'text-slate-800'} outline-none`}
                             />
                             <div className="grid grid-cols-2 gap-2">
                                 <input
                                     value={item.manufacturer || ''}
                                     onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, manufacturer: e.target.value } : pi))}
                                     placeholder="メーカー"
-                                    className="text-[10px] bg-white/50 border border-slate-200 rounded px-1.5 py-0.5 outline-none focus:border-blue-400"
+                                    className="text-[10px] bg-white/50 border border-slate-200 rounded px-1.5 py-0.5"
                                 />
                                 <input
                                     value={item.model || ''}
                                     onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, model: e.target.value } : pi))}
                                     placeholder="型式"
-                                    className="text-[10px] bg-white/50 border border-slate-200 rounded px-1.5 py-0.5 outline-none focus:border-blue-400"
+                                    className="text-[10px] bg-white/50 border border-slate-200 rounded px-1.5 py-0.5"
                                 />
                                 <input
                                     value={item.dimensions || ''}
                                     onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, dimensions: e.target.value } : pi))}
                                     placeholder="寸法"
-                                    className="col-span-2 text-[10px] bg-white/50 border border-slate-200 rounded px-1.5 py-0.5 outline-none focus:border-blue-400"
+                                    className="col-span-2 text-[10px] bg-white/50 border border-slate-200 rounded px-1.5 py-0.5"
                                 />
                             </div>
                             <div className="flex items-center gap-1 mt-1">
-                                <span className="px-1.5 py-0.5 bg-slate-100 text-[8px] font-black text-slate-400 rounded border border-slate-200">自由入力</span>
-                                {!item.id.startsWith('registered-') && (
-                                    <button
-                                        onClick={() => handleRegisterToMaster(item)}
-                                        className="flex items-center gap-1 px-1.5 py-0.5 bg-emerald-50 text-emerald-600 text-[8px] font-black rounded border border-emerald-100 hover:bg-emerald-100 transition-colors"
-                                    >
-                                        <Database size={8} /> マスタ登録
-                                    </button>
+                                {isReturn ? (
+                                    historyInfo ? (
+                                        <div className="flex gap-1">
+                                            <span className="px-1.5 py-0.5 bg-rose-100 text-[8px] font-black text-rose-600 rounded border border-rose-200 uppercase tracking-tighter">
+                                                {historyInfo.month} 納品分
+                                            </span>
+                                            <span className={`px-1.5 py-0.5 ${isExceeding ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-400'} text-[8px] font-black rounded border border-slate-200`}>
+                                                返品可能残: {historyInfo.available}
+                                            </span>
+                                        </div>
+                                    ) : (
+                                        <span className="px-1.5 py-0.5 bg-amber-50 text-[8px] font-black text-amber-600 rounded border border-amber-200">履歴外アイテム</span>
+                                    )
+                                ) : (
+                                    <span className="px-1.5 py-0.5 bg-slate-100 text-[8px] font-black text-slate-400 rounded border border-slate-200">通常入力</span>
                                 )}
                             </div>
                         </div>
                     </td>
                     <td className="text-center">
-                        <input
-                            type="number"
-                            value={item.quantity}
-                            onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, quantity: parseInt(e.target.value) || 0 } : pi))}
-                            className="w-full py-2 border rounded-xl text-center font-black bg-slate-50 no-spin-buttons outline-none focus:border-blue-400"
-                        />
+                        <div className="relative">
+                            <input
+                                type="number"
+                                value={item.quantity}
+                                onChange={e => {
+                                    const val = parseInt(e.target.value) || 0;
+                                    onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, quantity: val } : pi));
+                                }}
+                                className={`w-full py-2 border rounded-xl text-center font-black bg-slate-50 outline-none ${isExceeding ? 'border-rose-500 text-rose-600 animate-pulse' : 'focus:border-blue-400'}`}
+                            />
+                            {isExceeding && (
+                                <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-rose-600 text-white text-[8px] px-2 py-1 rounded whitespace-nowrap shadow-lg z-50">
+                                    実績超過！可能数: {historyInfo.available}
+                                </div>
+                            )}
+                        </div>
                     </td>
                     <td className="text-center">
                         <input
                             type="number"
                             value={item.appliedPrice || 0}
                             onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, appliedPrice: parseInt(e.target.value) || 0 } : pi))}
-                            className="w-full py-2 border rounded-xl text-center font-black bg-slate-50 no-spin-buttons outline-none focus:border-blue-400 text-emerald-600"
+                            className="w-full py-2 border rounded-xl text-center font-black bg-slate-50 outline-none text-emerald-600"
                         />
                     </td>
                     <td className="text-right">
-                        <button onClick={() => onDelete(index)} className="p-2 text-rose-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all">
+                        <button onClick={() => onDelete(index)} className="p-2 text-rose-300 hover:text-rose-500">
                             <Trash2 size={18} />
                         </button>
                     </td>
@@ -585,6 +694,9 @@ export const SlipManager: React.FC<{
     const [historySearchQuery, setHistorySearchQuery] = useState('');
     const [expandedCustomers, setExpandedCustomers] = useState<Set<string>>(new Set<string>());
     const [isSaving, setIsSaving] = useState(false);
+    const [isAnalyzingReturn, setIsAnalyzingReturn] = useState(false);
+    const [returnAmbiguityResults, setReturnAmbiguityResults] = useState<any[]>([]);
+    const [showReturnResolutionModal, setShowReturnResolutionModal] = useState(false);
 
     useEffect(() => {
         const unsubscribe = storage.subscribeToSlips(setSlips);
@@ -601,18 +713,121 @@ export const SlipManager: React.FC<{
         return { pendingOutbounds: pending, archivedSlips: archived, reslips: res };
     }, [slips]);
 
+    const handleReturnAIAnalysis = async (file: File) => {
+        if (!customerName || !siteName) return alert('顧客名と現場名を先に選択してください。');
+        
+        setIsAnalyzingReturn(true);
+        try {
+            const context = siteHistoryItems.map(h => ({
+                id: h.id + '-' + h.historyMonth + '-' + h.appliedPrice,
+                name: h.name,
+                model: h.model,
+                dimensions: h.dimensions,
+                price: h.appliedPrice,
+                date: h.historyMonth,
+                maxAvailable: h.availableQuantity
+            }));
+
+            const result = await (storage as any).parseReturnMemoInFirebase ? await (storage as any).parseReturnMemoInFirebase(file, context) : await parseReturnMemo(file, context);
+            if (result && result.matches) {
+                setReturnAmbiguityResults(result.matches);
+                setShowReturnResolutionModal(true);
+            }
+        } catch (error) {
+            console.error(error);
+            alert('AI解析中にエラーが発生しました。');
+        } finally {
+            setIsAnalyzingReturn(false);
+        }
+    };
+
+    const handleApplyAIResults = (confirmedItems: any[]) => {
+        const newCartItems = confirmedItems.filter(ci => ci.selectedItem).map(item => ({
+            ...item.selectedItem,
+            quantity: -Math.abs(item.quantity),
+            deliveredQuantity: 0,
+            id: generateId(),
+            historyMonth: item.selectedItem.date,
+            availableQuantity: item.selectedItem.maxAvailable,
+            updatedAt: Date.now()
+        }));
+        onUpdateCart(prev => [...prev, ...newCartItems]);
+        setShowReturnResolutionModal(false);
+    };
+
     const filteredSuggestions = useMemo(() => {
         if (!customerName || !showSuggestions) return [];
         return customers.filter((c: Customer) => normalize(c.name).includes(normalize(customerName))).slice(0, 5);
     }, [customerName, showSuggestions, customers]);
 
+    // 現場の納品履歴アイテム（過去の「山」）の計算
+    const siteHistoryItems = useMemo(() => {
+        if (!customerName || !siteName) return [];
+        
+        // (キー) -> 実績データ
+        const historyMap = new Map<string, { 
+            name: string; model: string; dims: string; price: number; month: string; 
+            totalDelivered: number; totalReturned: number; item: SlipItem 
+        }>();
+
+        slips.forEach(s => {
+            if (s.customerName === customerName && s.constructionName === siteName) {
+                const month = s.date.slice(0, 7); // YYYY-MM
+                if (s.type === 'provisional' || s.type === 'delivery') {
+                    s.items.forEach(item => {
+                        const key = `${item.name}-${item.model}-${item.dimensions}-${item.appliedPrice}-${month}`;
+                        if (!historyMap.has(key)) {
+                            historyMap.set(key, { 
+                                name: item.name, model: item.model, dims: item.dimensions, 
+                                price: item.appliedPrice, month, 
+                                totalDelivered: 0, totalReturned: 0, item 
+                            });
+                        }
+                        const entry = historyMap.get(key)!;
+                        entry.totalDelivered += (item.deliveredQuantity || item.quantity);
+                    });
+                } else if (s.type === 'return') {
+                    s.items.forEach(item => {
+                        const key = `${item.name}-${item.model}-${item.dimensions}-${item.appliedPrice}-${item.date?.slice(0, 7) || month}`;
+                        if (historyMap.has(key)) {
+                            historyMap.get(key)!.totalReturned += Math.abs(item.quantity);
+                        }
+                    });
+                }
+            }
+        });
+
+        return Array.from(historyMap.values())
+            .map(entry => ({
+                ...entry.item,
+                availableQuantity: entry.totalDelivered - entry.totalReturned,
+                totalDelivered: entry.totalDelivered,
+                totalReturned: entry.totalReturned,
+                historyMonth: entry.month,
+                appliedPrice: entry.price
+            }))
+            .filter(i => i.availableQuantity > 0);
+    }, [customerName, siteName, slips]);
+
     const itemSuggestions = useMemo(() => {
         if (!itemSearchQuery.trim()) return [];
+        if (activeMode === 'return') {
+            // 返品モード時は納品履歴から検索
+            return siteHistoryItems.filter(i => 
+                normalizeForSearch(i.name).includes(normalizeForSearch(itemSearchQuery)) ||
+                normalizeForSearch(i.model || '').includes(normalizeForSearch(itemSearchQuery)) ||
+                normalizeForSearch(i.dimensions || '').includes(normalizeForSearch(itemSearchQuery))
+            ).slice(0, 30);
+        }
         return filterAndSortItems(masterItems, itemSearchQuery).slice(0, 30);
-    }, [itemSearchQuery, masterItems]);
+    }, [itemSearchQuery, masterItems, activeMode, siteHistoryItems]);
 
-    const handleAddFromMaster = (item: MaterialItem) => {
-        onUpdateCart(prev => [...prev, { ...item, quantity: 1, appliedPrice: item.sellingPrice, deliveredQuantity: 1 }]);
+    const handleAddFromMaster = (item: any) => {
+        if (activeMode === 'return') {
+            onUpdateCart(prev => [...prev, { ...item, quantity: -1, deliveredQuantity: 0 }]);
+        } else {
+            onUpdateCart(prev => [...prev, { ...item, quantity: 1, appliedPrice: item.sellingPrice || item.appliedPrice, deliveredQuantity: 1 }]);
+        }
         setItemSearchQuery(''); setShowItemSuggestions(false);
     };
 
@@ -687,12 +902,28 @@ export const SlipManager: React.FC<{
                 const qty = activeMode === 'return' ? -Math.abs(i.quantity) : i.quantity;
                 return { ...i, quantity: qty, deliveredQuantity: qty, date: slipDate };
             });
+
+            // 返品モード時の過剰数量チェック
+            if (activeMode === 'return') {
+                const overReturns = processedItems.filter(i => {
+                    const avail = (i as any).availableQuantity;
+                    return avail !== undefined && Math.abs(i.quantity) > avail;
+                });
+                if (overReturns.length > 0) {
+                    const names = overReturns.map(i => i.name).join(', ');
+                    if (!window.confirm(`${names} の返品数が納品実績を超えていますが、よろしいですか？`)) {
+                        setIsSaving(false);
+                        return;
+                    }
+                }
+            }
+
             const total = processedItems.reduce((s, i) => s + ((i.appliedPrice || 0) * i.quantity), 0);
 
             if (editingSlipId) {
                 const updateData: Partial<Slip> = {
                     date: slipDate, customerName, constructionName: siteName, items: processedItems,
-                    totalAmount: total, taxAmount: Math.floor(total * 0.1), grandTotal: Math.floor(total * 1.1),
+                    totalAmount: total, taxAmount: Math.round(total * 0.1), grandTotal: Math.round(total * 1.1),
                     note, deliveryTime: time, deliveryDestination: dest, orderingPerson, receivingPerson
                 };
                 try {
@@ -709,7 +940,7 @@ export const SlipManager: React.FC<{
                 const sNo = generateSlipNumber();
                 const newSlip: Omit<Slip, 'id'> = {
                     createdAt: Date.now(), date: slipDate, customerName, constructionName: siteName, items: processedItems.map(i => ({ ...i, sourceSlipNo: sNo })),
-                    totalAmount: total, taxAmount: Math.floor(total * 0.1), grandTotal: Math.floor(total * 1.1),
+                    totalAmount: total, taxAmount: Math.round(total * 0.1), grandTotal: Math.round(total * 1.1),
                     note, deliveryTime: time, deliveryDestination: dest, groupId: gid, slipNumber: sNo,
                     orderingPerson, receivingPerson, type: activeMode === 'return' ? 'return' : 'outbound', isClosed: activeMode === 'return'
                 };
@@ -757,8 +988,8 @@ export const SlipManager: React.FC<{
                 type: 'provisional',
                 items: deliveredItems,
                 totalAmount: total,
-                grandTotal: Math.floor(total * 1.1),
-                taxAmount: Math.floor(total * 0.1),
+                grandTotal: Math.round(total * 1.1),
+                taxAmount: Math.round(total * 0.1),
                 slipNumber: confirmingOutbound.slipNumber,
                 createdAt: Date.now(),
                 issuerPerson: issuer,
@@ -839,7 +1070,7 @@ export const SlipManager: React.FC<{
         const allDocs: Slip[] = [];
         const siteEntries = Array.from(siteTotals.entries());
         const totalNet = siteEntries.reduce((acc, e) => acc + e[1], 0);
-        const totalTax = Math.floor(totalNet * 0.1);
+        const totalTax = Math.round(totalNet * 0.1);
 
         if (!targetSite) {
             allDocs.push({
@@ -855,7 +1086,7 @@ export const SlipManager: React.FC<{
             if (targetSite && formatSiteName(targetSite) !== sName) return;
             const sItems = Array.from(items.values()).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
             const sNet = sItems.reduce((acc, b) => acc + ((b.appliedPrice || 0) * (b.deliveredQuantity || 0)), 0);
-            const sTax = Math.floor(sNet * 0.1);
+            const sTax = Math.round(sNet * 0.1);
             const siteSlipNo = `DET-${targetMonth.replace('-', '')}-${sName.substring(0, 4)}`;
             const baseMeta: any = { customerName: cName, constructionName: sName, totalAmount: sNet, taxAmount: sTax, grandTotal: sNet + sTax, date: new Date().toISOString().slice(0, 10), createdAt: Date.now(), isClosed: true, slipNumber: siteSlipNo };
             allDocs.push({ ...baseMeta, id: 'site-cover-' + sName, type: 'cover' });
@@ -886,6 +1117,7 @@ export const SlipManager: React.FC<{
         }
         setPreEditTab(activeTab); // 編集前のタブを記憶
         setEditingSlipId(s.id);
+        setActiveMode(s.type === 'return' ? 'return' : 'sales'); // 伝票タイプに合わせてモードを切り替え
         setCustomerName(s.customerName);
         setSiteName(s.constructionName || '');
         setOrderingPerson(s.orderingPerson || '');
@@ -1128,10 +1360,10 @@ export const SlipManager: React.FC<{
                         </div>
                         <div>
                             <h2 className="text-2xl font-black text-slate-900 tracking-tight">
-                                {initialTab === 'history' ? '伝票・請求履歴管理' : (editingSlipId ? '仮納品書修正中' : '現場出庫・返品処理')}
+                                {initialTab === 'history' ? '伝票・請求履歴管理' : (editingSlipId ? (activeMode === 'return' ? '返品伝票の修正中' : '出庫伝票の修正中') : '現場出庫・返品処理')}
                             </h2>
                             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">
-                                {initialTab === 'history' ? 'Invoice & Records Management' : (editingSlipId ? 'Modifying Provisional Delivery Note' : 'Active Shipping Operations')}
+                                {initialTab === 'history' ? 'Invoice & Records Management' : (editingSlipId ? 'Modifying Existing Slip' : 'Active Shipping Operations')}
                             </p>
                         </div>
                     </div>
@@ -1171,6 +1403,15 @@ export const SlipManager: React.FC<{
                                     </div>
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="relative"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">日付</label><input type="date" value={slipDate} onChange={e => setSlipDate(e.target.value)} className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold" /></div>
+                                        <div>
+                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">備考</label>
+                                            <textarea 
+                                                value={note} 
+                                                onChange={e => setNote(e.target.value)} 
+                                                placeholder="指示事項・備考などの入力..."
+                                                className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold outline-none focus:ring-2 focus:ring-blue-500 min-h-[46px] h-[46px] resize-none"
+                                            />
+                                        </div>
                                     </div>
                                     <div className="border-t pt-6">
                                         <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 grow flex flex-col min-h-0">
@@ -1185,10 +1426,43 @@ export const SlipManager: React.FC<{
                                                     </button>
                                                 </div>
                                             </div>
-                                            <div className="relative mb-6">
-                                                <Search className="absolute left-4 top-3.5 text-slate-400" size={18} />
-                                                <input value={itemSearchQuery} onChange={e => { setItemSearchQuery(e.target.value); setShowItemSuggestions(true); }} placeholder="複数キーワードで資材を検索（例: VP 50 エルボ）" className="w-full pl-12 pr-4 py-4 bg-slate-50 border-2 border-slate-100 rounded-2xl font-bold focus:border-blue-500 transition-all outline-none shadow-inner" />
-                                                {showItemSuggestions && itemSuggestions.length > 0 && (<div className="absolute top-full left-0 right-0 bg-white border shadow-2xl z-30 rounded-[1.5rem] mt-2 max-h-64 overflow-y-auto">{itemSuggestions.map(i => (<div key={i.id} onClick={() => handleAddFromMaster(i)} className="p-4 hover:bg-blue-50 cursor-pointer border-b last:border-0 flex justify-between items-center font-bold text-sm">{i.name} <span className="text-[10px] bg-slate-100 px-2 py-1 rounded font-mono ml-2">{i.model} {i.dimensions}</span></div>))}</div>)}
+                                            <div className="flex gap-4 mb-6 no-print">
+                                                <div className="relative flex-grow">
+                                                    <Search className={`absolute left-4 top-4 ${activeMode === 'return' ? 'text-rose-400' : 'text-slate-400'}`} size={18} />
+                                                    <input 
+                                                        value={itemSearchQuery} 
+                                                        onChange={e => { setItemSearchQuery(e.target.value); setShowItemSuggestions(true); }} 
+                                                        placeholder={activeMode === 'return' ? "現場の納品履歴から資材をピックアップ..." : "複数キーワードで資材を検索（例: VP 50 エルボ）"} 
+                                                        className={`w-full pl-12 pr-4 py-4 bg-slate-50 border-2 ${activeMode === 'return' ? 'border-rose-100 focus:border-rose-500' : 'border-slate-100 focus:border-blue-500'} rounded-2xl font-bold transition-all outline-none shadow-inner text-sm`} 
+                                                    />
+                                                    {showItemSuggestions && itemSuggestions.length > 0 && (
+                                                        <div className="absolute top-full left-0 right-0 bg-white border shadow-2xl z-[100] rounded-[1.5rem] mt-2 max-h-64 overflow-y-auto">
+                                                            {itemSuggestions.map((i: any) => (
+                                                                <div key={i.id + (i.historyMonth || '')} onClick={() => handleAddFromMaster(i)} className="p-4 hover:bg-blue-50 cursor-pointer border-b last:border-0 flex justify-between items-center font-bold text-sm">
+                                                                    <div className="flex flex-col">
+                                                                        <span>{i.name}</span>
+                                                                        <span className="text-[10px] text-slate-400 font-mono">{i.model} {i.dimensions}</span>
+                                                                    </div>
+                                                                    <div className="flex items-center gap-4">
+                                                                        {i.historyMonth && <span className="text-[9px] bg-rose-50 text-rose-600 px-2 py-1 rounded font-black">{i.historyMonth} 納品</span>}
+                                                                        <span className="text-[11px] font-black text-emerald-600">¥{(i.appliedPrice || 0).toLocaleString()}</span>
+                                                                        {i.availableQuantity !== undefined && <span className="text-[9px] bg-slate-100 px-2 py-1 rounded">残:{i.availableQuantity}</span>}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                {activeMode === 'return' && (
+                                                    <label className={`flex items-center gap-3 px-6 py-4 ${isAnalyzingReturn ? 'bg-slate-400' : 'bg-gradient-to-br from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700'} text-white rounded-2xl font-black text-xs cursor-pointer shadow-xl transition-all active:scale-95 shrink-0`}>
+                                                        {isAnalyzingReturn ? <Loader2 className="animate-spin" size={20} /> : <Sparkles size={20} />}
+                                                        <span>{isAnalyzingReturn ? 'AI解析中...' : '手書きメモを解析'}</span>
+                                                        <input type="file" accept="image/*" className="hidden" onChange={e => {
+                                                            const file = e.target.files?.[0];
+                                                            if (file) handleReturnAIAnalysis(file);
+                                                        }} disabled={isAnalyzingReturn} />
+                                                    </label>
+                                                )}
                                             </div>
                                             <table className="w-full text-sm">
                                                 <thead><tr className="text-slate-400 text-[10px] uppercase font-black tracking-widest border-b pb-2"><th className="w-8"></th><th className="pb-2 text-left">品名 / 明細</th><th className="w-24 text-center pb-2">数量</th><th className="w-28 text-center pb-2">単価(¥)</th><th className="w-12"></th></tr></thead>
@@ -1275,7 +1549,7 @@ export const SlipManager: React.FC<{
                                                                         </div>
                                                                         <div className="sm:hidden border-t border-slate-100 my-1"></div>
                                                                         <div className="font-mono font-black text-slate-900 sm:w-32 sm:text-right">
-                                                                            ¥{(sl.grandTotal || 0).toLocaleString()}
+                                                                            ¥{(sl.totalAmount || 0).toLocaleString()}
                                                                         </div>
                                                                     </div>
                                                                     <div className="flex items-center justify-end gap-3 shrink-0">
@@ -1331,6 +1605,9 @@ export const SlipManager: React.FC<{
                                                 <button onClick={() => { setPrintingSlips([s]); }} className="flex-1 md:flex-none bg-white border border-slate-200 px-4 md:px-6 py-3 rounded-2xl text-[10px] md:text-[11px] font-black hover:bg-slate-50 transition-all uppercase tracking-widest whitespace-nowrap">
                                                     <span className="md:hidden">プレビュー</span><span className="hidden md:inline">出庫用伝票を印刷</span>
                                                 </button>
+                                                <button onClick={() => handleEditSlip(s)} className="p-3 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-2xl transition-all" title="内容を修正">
+                                                    <Edit3 size={20} />
+                                                </button>
                                             </>
                                         ) : (
                                             <button onClick={async () => { onUpdateCart(s.items.map(i => ({ ...i, quantity: i.quantity }))); setCustomerName(s.customerName); setSiteName(s.constructionName || ''); handleTabChange('create'); if (s.id) await storage.deleteSlip(s.id); }} className="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-700 text-white px-4 md:px-8 py-3 rounded-2xl text-[10px] md:text-[11px] font-black shadow-xl shadow-emerald-100 active:scale-95 transition-all uppercase tracking-widest whitespace-nowrap">
@@ -1365,6 +1642,13 @@ export const SlipManager: React.FC<{
                     )}
                 </div>
             </div>
+            {showReturnResolutionModal && (
+                <ReturnResolutionModal
+                    results={returnAmbiguityResults}
+                    onApply={handleApplyAIResults}
+                    onClose={() => setShowReturnResolutionModal(false)}
+                />
+            )}
             <style>{`
                 .no-spin-buttons::-webkit-outer-spin-button,
                 .no-spin-buttons::-webkit-inner-spin-button {

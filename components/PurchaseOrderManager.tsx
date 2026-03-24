@@ -139,8 +139,8 @@ export const PurchaseOrderManager: React.FC<PurchaseOrderManagerProps> = ({ mast
             ...prev,
             items,
             totalAmount: total,
-            taxAmount: Math.floor(total * 0.1),
-            grandTotal: Math.floor(total * 1.1)
+            taxAmount: Math.round(total * 0.1),
+            grandTotal: Math.round(total * 1.1)
         } : null);
     };
 

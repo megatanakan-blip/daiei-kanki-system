@@ -29,6 +29,39 @@ const materialSchema = {
   }
 };
 
+const returnMemoSchema = {
+  type: Type.OBJECT,
+  properties: {
+    matches: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          originalText: { type: Type.STRING, description: "ノート等の原文" },
+          quantity: { type: Type.NUMBER, description: "返品数量" },
+          isAmbiguous: { type: Type.BOOLEAN, description: "複数の候補（単価やロット）があるか" },
+          suggestedItems: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING, description: "履歴アイテムのユニークキー" },
+                name: { type: Type.STRING },
+                model: { type: Type.STRING },
+                dimensions: { type: Type.STRING },
+                price: { type: Type.NUMBER, description: "納品時の単価" },
+                date: { type: Type.STRING, description: "納品時期（例：2025年3月）" },
+                maxAvailable: { type: Type.NUMBER, description: "その単価での最大返品可能数" },
+                matchScore: { type: Type.NUMBER, description: "名称等の一致度(0-1)" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+};
+
 const orderMemoSchema = {
   type: Type.OBJECT,
   properties: {
@@ -94,6 +127,39 @@ ${MATERIAL_CATEGORIES.join(", ")}
   } catch (e) {
     console.error("JSON Parse Error:", e);
     return [];
+  }
+};
+
+export const parseReturnMemo = async (file: File, deliveryHistoryContext: any[]): Promise<any> => {
+  const ai = getAi();
+  const contentPart = await prepareContent(file);
+  const prompt = `あなたは配管資材のプロです。手書きの返品メモ（またはテキスト）を解析し、提供された「納品履歴の山」の中から該当するアイテムを探し出してください。
+
+【制約事項】
+1. マスターからではなく、提供された「納品履歴リスト」から最も近いアイテムを選んでください。
+2. 数量が納品実績を超えている場合は、その旨が分かるように最大可能数を設定してください。
+3. 同じ品名でも納品時期によって単価が異なる場合があります。その場合は suggestedItems に複数の候補を含め、isAmbiguous を true にしてください。
+4. 納品時期は「2025年3月」のように年月形式で提示してください。
+
+【納品履歴の山】
+${JSON.stringify(deliveryHistoryContext)}
+
+【解析対象】
+提供された画像またはテキストに基づき、正確にマッピングしてください。`;
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: [{ parts: [contentPart, { text: prompt }] }],
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: returnMemoSchema
+    }
+  });
+
+  try {
+    return JSON.parse(response.text || "{}");
+  } catch (e) {
+    return { matches: [] };
   }
 };
 

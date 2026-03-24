@@ -644,7 +644,7 @@ export const EstimateManager: React.FC<EstimateManagerProps> = ({ onClose, onCon
 
   const recalculate = useCallback((items: SlipItem[], meta: Partial<Estimate>) => {
     const total = items.reduce((s, i) => s + ((i.appliedPrice || 0) * (i.quantity || 0)), 0);
-    setSelectedEstimate(prev => prev ? { ...prev, ...meta, items, totalAmount: total, taxAmount: Math.floor(total * 0.1), grandTotal: Math.floor(total * 1.1) } : null);
+    setSelectedEstimate(prev => prev ? { ...prev, ...meta, items, totalAmount: total, taxAmount: Math.round(total * 0.1), grandTotal: Math.round(total * 1.1) } : null);
   }, []);
 
   const createEmptyItem = useCallback((idx: number): SlipItem => ({
