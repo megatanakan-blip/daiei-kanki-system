@@ -467,16 +467,49 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                                         <td className="border-r border-slate-900 py-1 font-black text-center w-1/4">受領 (直接引取)</td>
                                         <td className="py-1 font-black text-center w-1/4 text-blue-800 bg-blue-50/20">現場荷受サイン (受領印)</td>
                                     </tr>
-                                    <tr className="h-20">
-                                        <td className="border-r border-slate-900 text-center align-middle">
+                                    <tr className="h-20 text-center align-middle">
+                                        {/* 出庫印 */}
+                                        <td className="border-r border-slate-900 group relative">
+                                            <input
+                                                value={slip.issuerPerson || ''}
+                                                onChange={e => onUpdateSlip?.({ issuerPerson: e.target.value })}
+                                                placeholder="出庫者"
+                                                className="absolute inset-0 w-full h-full opacity-0 focus:opacity-100 hover:opacity-10 dark:hover:opacity-30 bg-white/80 text-center font-black z-10 outline-none text-[10px] print:hidden"
+                                            />
                                             {slip.issuerPerson && (
-                                                <div className="inline-block border-2 border-red-500 text-red-500 rounded-full w-14 h-14 flex items-center justify-center font-black text-xs rotate-[-12deg] shadow-sm transform hover:scale-110 transition-transform">
+                                                <div className="inline-block border-2 border-red-500 text-red-500 rounded-full w-14 h-14 flex items-center justify-center font-black text-xs rotate-[-12deg] shadow-sm transform transition-transform">
                                                     {slip.issuerPerson}
                                                 </div>
                                             )}
                                         </td>
-                                        <td className="border-r border-slate-900"></td>
-                                        <td className="border-r border-slate-900"></td>
+                                        {/* 配送印 */}
+                                        <td className="border-r border-slate-900 group relative">
+                                            <input
+                                                value={slip.deliveryPerson || ''}
+                                                onChange={e => onUpdateSlip?.({ deliveryPerson: e.target.value })}
+                                                placeholder="配送者"
+                                                className="absolute inset-0 w-full h-full opacity-0 focus:opacity-100 hover:opacity-10 dark:hover:opacity-30 bg-white/80 text-center font-black z-10 outline-none text-[10px] print:hidden"
+                                            />
+                                            {slip.deliveryPerson && (
+                                                <div className="inline-block border-2 border-red-500 text-red-500 rounded-full w-14 h-14 flex items-center justify-center font-black text-xs rotate-[-12deg] shadow-sm transform transition-transform">
+                                                    {slip.deliveryPerson}
+                                                </div>
+                                            )}
+                                        </td>
+                                        {/* 受領印 (直接引取) */}
+                                        <td className="border-r border-slate-900 group relative">
+                                            <input
+                                                value={slip.receiverPerson || ''}
+                                                onChange={e => onUpdateSlip?.({ receiverPerson: e.target.value })}
+                                                placeholder="受領者"
+                                                className="absolute inset-0 w-full h-full opacity-0 focus:opacity-100 hover:opacity-10 dark:hover:opacity-30 bg-white/80 text-center font-black z-10 outline-none text-[10px] print:hidden"
+                                            />
+                                            {slip.receiverPerson && (
+                                                <div className="inline-block border-2 border-red-500 text-red-500 rounded-full w-14 h-14 flex items-center justify-center font-black text-xs rotate-[-12deg] shadow-sm transform transition-transform">
+                                                    {slip.receiverPerson}
+                                                </div>
+                                            )}
+                                        </td>
                                         <td className="bg-white"></td>
                                     </tr>
                                 </tbody>

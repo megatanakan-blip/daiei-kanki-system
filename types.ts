@@ -115,6 +115,8 @@ export interface Slip {
   orderingPerson?: string;
   receivingPerson?: string;
   issuerPerson?: string;
+  deliveryPerson?: string;
+  receiverPerson?: string;
   isHandled?: boolean;
   source?: 'link' | 'core';
   // 請求書用追加フィールド
