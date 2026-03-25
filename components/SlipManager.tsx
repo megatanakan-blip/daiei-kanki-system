@@ -1151,10 +1151,43 @@ export const SlipManager: React.FC<{
             const siteSlipNo = `DET-${targetMonth.replace('-', '')}-${sName.substring(0, 4)}`;
             const baseMeta: any = { customerName: cName, constructionName: sName, totalAmount: sNet, taxAmount: sTax, grandTotal: sNet + sTax, date: new Date().toISOString().slice(0, 10), createdAt: Date.now(), isClosed: true, slipNumber: siteSlipNo };
             allDocs.push({ ...baseMeta, id: 'site-cover-' + sName, type: 'cover' });
-            const deliveryChunks = []; for (let i = 0; i < sItems.length; i += 16) deliveryChunks.push(sItems.slice(i, i + 16));
-            deliveryChunks.forEach((chunk, pageIdx) => allDocs.push({ ...baseMeta, id: `delivery-${sName}-${pageIdx}`, type: 'delivery', items: chunk, slipNumber: `${siteSlipNo}-D${pageIdx + 1}` }));
-            const invoiceChunks = []; for (let i = 0; i < sItems.length; i += 16) invoiceChunks.push(sItems.slice(i, i + 16));
-            invoiceChunks.forEach((chunk, pageIdx) => allDocs.push({ ...baseMeta, id: `invoice-${sName}-${pageIdx}`, type: 'invoice', items: chunk, slipNumber: `${siteSlipNo}-I${pageIdx + 1}` }));
+            // 納品明細書 (日付別分割表示)
+            const dateGroups = new Map<string, (SlipItem & { sourceSlipNo?: string })[]>();
+            sItems.forEach(i => {
+                const d = i.date || 'unknown';
+                if (!dateGroups.has(d)) dateGroups.set(d, []);
+                dateGroups.get(d)!.push(i);
+            });
+
+            Array.from(dateGroups.entries()).sort((a, b) => a[0].localeCompare(b[0])).forEach(([date, dItems]) => {
+                const dNet = dItems.reduce((acc, b) => acc + ((b.appliedPrice || 0) * (b.deliveredQuantity || 0)), 0);
+                const dTax = Math.round(dNet * 0.1);
+                for (let i = 0; i < dItems.length; i += 16) {
+                    allDocs.push({
+                        ...baseMeta,
+                        id: `delivery-${sName}-${date}-${i}`,
+                        type: 'delivery',
+                        items: dItems.slice(i, i + 16) as SlipItem[],
+                        totalAmount: dNet,
+                        taxAmount: dTax,
+                        grandTotal: dNet + dTax,
+                        date: date,
+                        slipNumber: `DLV-${date.replace(/-/g, '')}${i > 0 ? `-${i/16 + 1}` : ''}`
+                    });
+                }
+            });
+
+            // 請求明細書 (一覧形式維持)
+            for (let i = 0; i < sItems.length; i += 16) {
+                const chunk = sItems.slice(i, i + 16);
+                allDocs.push({
+                    ...baseMeta,
+                    id: `invoice-${sName}-${i}`,
+                    type: 'invoice',
+                    items: chunk,
+                    slipNumber: `${siteSlipNo}-I${i / 16 + 1}`
+                });
+            }
         });
         setPrintingSlips(allDocs);
     };

@@ -66,7 +66,7 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
     const [filters, setFilters] = React.useState({ category: '', name: '', manufacturer: '', model: '', location: '' });
     const [showRevisedOnly, setShowRevisedOnly] = React.useState(false); // 価格改定ありのみ表示
     const [calcRate, setCalcRate] = React.useState<string>('');
-    const [calcType, setCalcType] = React.useState<'list_rate' | 'cost_markup' | 'cost_rate'>('list_rate');
+    const [calcType, setCalcType] = React.useState<'list_selling_rate' | 'list_cost_rate' | 'cost_markup' | 'cost_rate'>('list_selling_rate');
     const [isProcessing, setIsProcessing] = React.useState(false);
 
     const handleBulkCalc = async () => {
@@ -74,15 +74,17 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
         if (isNaN(rate)) return alert("有効な数値を入力してください");
 
         const updates = items.filter(i => selectedIds.has(i.id)).map(item => {
-            let newPrice = 0;
-            if (calcType === 'list_rate') {
-                if (item.listPrice > 0) newPrice = Math.round(item.listPrice * (rate / 100));
+            let updateData: Partial<MaterialItem> = {};
+            if (calcType === 'list_selling_rate') {
+                if (item.listPrice > 0) updateData.sellingPrice = Math.round(item.listPrice * (rate / 100));
+            } else if (calcType === 'list_cost_rate') {
+                if (item.listPrice > 0) updateData.costPrice = Math.round(item.listPrice * (rate / 100));
             } else if (calcType === 'cost_markup') {
-                if (item.costPrice > 0) newPrice = Math.round(item.costPrice * (1 + (rate / 100)));
+                if (item.costPrice > 0) updateData.sellingPrice = Math.round(item.costPrice * (1 + (rate / 100)));
             } else { // cost_rate: 利益率から逆算
-                if (item.costPrice > 0 && rate < 100) newPrice = Math.round(item.costPrice / (1 - (rate / 100)));
+                if (item.costPrice > 0 && rate < 100) updateData.sellingPrice = Math.round(item.costPrice / (1 - (rate / 100)));
             }
-            return newPrice > 0 ? { id: item.id, data: { sellingPrice: newPrice } } : null;
+            return Object.keys(updateData).length > 0 ? { id: item.id, data: updateData } : null;
         }).filter(Boolean) as { id: string; data: Partial<MaterialItem> }[];
 
         if (updates.length > 0) {
@@ -223,9 +225,10 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
 
                         <div className="flex items-center gap-1.5 sm:gap-2 justify-center">
                             <select value={calcType} onChange={e => setCalcType(e.target.value as any)} className="bg-slate-800 text-[10px] sm:text-xs border border-slate-700 rounded-lg px-1.5 sm:px-2 py-1 outline-none">
-                                <option value="list_rate">定価の〇%</option>
-                                <option value="cost_markup">仕入値+〇%</option>
-                                <option value="cost_rate">利益率〇%</option>
+                                <option value="list_selling_rate">定価の〇% (売値)</option>
+                                <option value="list_cost_rate">定価の〇% (仕入値)</option>
+                                <option value="cost_markup">仕入値+〇% (売値)</option>
+                                <option value="cost_rate">利益率〇% (売値)</option>
                             </select>
                             <input type="number" value={calcRate} onChange={e => setCalcRate(e.target.value)} placeholder="%" className="w-12 sm:w-16 bg-slate-800 text-white text-[10px] sm:text-xs border border-slate-700 rounded-lg px-1.5 sm:px-2 py-1 outline-none text-center" disabled={isProcessing} />
                             <button onClick={handleBulkCalc} disabled={isProcessing} className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 px-2 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-black transition-colors whitespace-nowrap min-w-[50px] sm:min-w-[60px]">
