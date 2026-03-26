@@ -204,7 +204,8 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                             <div>
                                 <h3 className="text-base font-bold mb-0.5">{info.companyName}</h3>
                                 <p>{info.postalCode} {info.address}</p>
-                                <p className="mt-1 font-bold">登録番号: {info.invoiceNumber}</p>
+                                <p className="mt-1 font-bold">TEL: {info.phone} / FAX: {info.fax}</p>
+                                <p className="font-bold">登録番号: {info.invoiceNumber}</p>
                                 <p className="mt-1 text-slate-500">発行日: {new Date().toLocaleDateString('ja-JP')}</p>
                             </div>
                         </div>
@@ -751,6 +752,7 @@ export const SlipManager: React.FC<{
     const [targetMonth, setTargetMonth] = useState<string>(new Date().toISOString().slice(0, 7));
     const [historySearchQuery, setHistorySearchQuery] = useState('');
     const [expandedCustomers, setExpandedCustomers] = useState<Set<string>>(new Set<string>());
+    const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isAnalyzingReturn, setIsAnalyzingReturn] = useState(false);
     const [returnAmbiguityResults, setReturnAmbiguityResults] = useState<any[]>([]);
@@ -1610,6 +1612,25 @@ export const SlipManager: React.FC<{
                             <div className="bg-white rounded-[2rem] border-b p-6 flex flex-col md:flex-row items-center gap-6 shadow-sm mb-6">
                                 <div className="flex items-center gap-3 shrink-0"><span className="text-xs font-black text-slate-400 uppercase tracking-widest">対象月:</span><input type="month" value={targetMonth} onChange={e => setTargetMonth(e.target.value)} className="px-4 py-2.5 border rounded-2xl font-black bg-slate-50 outline-none" /></div>
                                 <div className="flex-grow relative w-full"><Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input value={historySearchQuery} onChange={e => setHistorySearchQuery(e.target.value)} placeholder="顧客名、現場名、または商品名・型式で検索して履歴を呼び出し..." className="w-full pl-14 pr-6 py-3.5 bg-slate-50 border-none rounded-2xl font-bold outline-none focus:ring-2 focus:ring-emerald-500 shadow-inner" /></div>
+                                <button
+                                    onClick={() => {
+                                        if (isAdminUnlocked) {
+                                            setIsAdminUnlocked(false);
+                                            return;
+                                        }
+                                        const pw = prompt('管理者パスワードを入力してください');
+                                        if (pw === (settings?.adminPassword || '0000')) {
+                                            setIsAdminUnlocked(true);
+                                        } else if (pw !== null) {
+                                            alert('パスワードが違います');
+                                        }
+                                    }}
+                                    className={`p-3 rounded-2xl flex items-center gap-2 transition-all ${isAdminUnlocked ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-200' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}
+                                    title={isAdminUnlocked ? "金額を非表示" : "金額を表示 (管理者専用)"}
+                                >
+                                    {isAdminUnlocked ? <EyeOff size={20} /> : <Eye size={20} />}
+                                    <span className="text-[10px] font-black uppercase tracking-widest hidden lg:inline">{isAdminUnlocked ? 'HIDE TOTAL' : 'SHOW TOTAL'}</span>
+                                </button>
                             </div>
                             <div className="flex-grow overflow-y-auto space-y-6">
                                 {customerHierarchy.map(([c, sMap]) => (
@@ -1618,6 +1639,15 @@ export const SlipManager: React.FC<{
                                             <div className="flex items-center gap-3 shrink-0">
                                                 <Building2 size={24} className="text-emerald-400" />
                                                 <h3 className="text-lg md:text-xl font-black truncate">{c}</h3>
+                                                {isAdminUnlocked && (
+                                                    <div className="ml-4 px-3 py-1 bg-emerald-400/10 border border-emerald-400/20 rounded-full flex items-center gap-2 animate-in fade-in zoom-in duration-300">
+                                                        <span className="text-[10px] font-black text-emerald-500/60 uppercase tracking-tighter">TOTAL:</span>
+                                                        <span className="text-base md:text-lg font-mono font-black text-emerald-400">
+                                                            ¥{Math.round((Array.from(sMap.values()).flat() as Slip[]).reduce((acc, s) => acc + (s.grandTotal ?? ((s.totalAmount || 0) * 1.1)), 0)).toLocaleString()}
+                                                        </span>
+                                                        <span className="text-[10px] font-black text-emerald-400 opacity-60">(税込)</span>
+                                                    </div>
+                                                )}
                                             </div>
                                             <div className="flex items-center justify-between sm:justify-end gap-4 w-full sm:w-auto">
                                                 <button onClick={(e) => { e.stopPropagation(); handleInvoiceIssuance(c, null, Array.from(sMap.values()).flat() as Slip[]); }} className="flex-1 sm:flex-none bg-blue-600 hover:bg-blue-700 px-4 md:px-6 py-2.5 rounded-2xl text-[10px] font-black uppercase shadow-xl active:scale-95 transition-all">一括請求書を発行</button>

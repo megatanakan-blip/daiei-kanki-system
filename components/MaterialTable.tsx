@@ -133,14 +133,16 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
         return config.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />;
     };
 
-    const filteredItems = items.filter(item => {
+    const isSearchActive = Object.values(filters).some(v => typeof v === 'string' && v.trim() !== '') || showRevisedOnly;
+
+    const filteredItems = !isSearchActive ? [] : items.filter(item => {
         return (
             (!filters.category || item.category.includes(filters.category)) &&
             (!filters.name || item.name.toLowerCase().includes(filters.name.toLowerCase())) &&
             (!filters.manufacturer || (item.manufacturer || '').toLowerCase().includes(filters.manufacturer.toLowerCase())) &&
             (!filters.model || `${item.model || ''} ${item.dimensions || ''} `.toLowerCase().includes(filters.model.toLowerCase())) &&
             (!filters.location || (item.location || '').toLowerCase().includes(filters.location.toLowerCase())) &&
-            (!showRevisedOnly || (item.previousListPrice && item.previousListPrice !== item.listPrice) || (item.previousCostPrice && item.previousCostPrice !== item.costPrice))
+            (!showRevisedOnly || (item.previousListPrice && item.previousListPrice !== item.listPrice) || (item.previousCostPrice && item.previousCostPrice !== item.listPrice))
         );
     });
 
@@ -306,112 +308,123 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-50">
-                        {sortedItems.map((item) => {
-                            const appliedPrice = getAppliedPrice(item);
-                            const isSelected = selectedIds.has(item.id);
+                        {!isSearchActive ? (
+                            <tr>
+                                <td colSpan={6} className="py-40 text-center text-slate-300 animate-in fade-in duration-700">
+                                    <Database size={80} className="mx-auto mb-6 opacity-20" />
+                                    <p className="text-sm font-black uppercase tracking-[0.2em] opacity-40 mb-2">表示負荷低減のため初期表示を制限しています</p>
+                                    <p className="text-xs font-bold opacity-30">分類を選択、または品名・型式を入力して検索してください</p>
+                                </td>
+                            </tr>
+                        ) : sortedItems.length === 0 ? (
+                            <tr>
+                                <td colSpan={6} className="py-40 text-center text-slate-300">
+                                    <Package size={64} className="mx-auto mb-4 opacity-10" />
+                                    <p className="font-black uppercase tracking-widest text-sm opacity-30">該当する資材が見つかりません</p>
+                                </td>
+                            </tr>
+                        ) : (
+                            sortedItems.map((item) => {
+                                const appliedPrice = getAppliedPrice(item);
+                                const isSelected = selectedIds.has(item.id);
 
-                            return (
-                                <tr key={item.id} className={`group transition-all hover:bg-slate-50 ${isSelected ? 'bg-blue-50/50' : ''}`}>
-                                    <td className="p-2 sm:p-4">
-                                        <button
-                                            onClick={() => onToggleSelect(item.id)}
-                                            className={`p-1 sm:p-2 rounded transition-colors ${isSelected ? 'text-blue-600' : 'text-slate-300 group-hover:text-slate-400'}`}
-                                        >
-                                            {isSelected ? <CheckSquare size={16} className="sm:hidden" /> : <Square size={16} className="sm:hidden" />}
-                                            {isSelected ? <CheckSquare size={20} className="hidden sm:block" /> : <Square size={20} className="hidden sm:block" />}
-                                        </button>
-                                    </td>
-                                    <td className="p-2 sm:p-4">
-                                        <div className="flex flex-col">
-                                            <span className="font-bold text-slate-900 leading-tight text-xs sm:text-sm">{item.name}</span>
-                                            <div className="flex flex-wrap items-center gap-x-2 sm:gap-x-3 gap-y-1 mt-1">
-                                                <span className="text-xs sm:text-sm font-black text-slate-700 uppercase tracking-widest">{item.category}</span>
-                                                {item.manufacturer && <span className="text-[8px] sm:text-[9px] text-slate-500 font-bold">{item.manufacturer}</span>}
-                                                {item.location && (
-                                                    <div className="flex items-center gap-0.5 px-1 sm:px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded text-[8px] sm:text-[9px] font-black border border-indigo-100 uppercase tracking-wider">
-                                                        <MapPin size={7} className="sm:hidden" />
-                                                        <MapPin size={8} className="hidden sm:block" />
-                                                        {item.location}
+                                return (
+                                    <tr key={item.id} className={`group transition-all hover:bg-slate-50 ${isSelected ? 'bg-blue-50/50' : ''}`}>
+                                        <td className="p-2 sm:p-4">
+                                            <button
+                                                onClick={() => onToggleSelect(item.id)}
+                                                className={`p-1 sm:p-2 rounded transition-colors ${isSelected ? 'text-blue-600' : 'text-slate-300 group-hover:text-slate-400'}`}
+                                            >
+                                                {isSelected ? <CheckSquare size={16} className="sm:hidden" /> : <Square size={16} className="sm:hidden" />}
+                                                {isSelected ? <CheckSquare size={20} className="hidden sm:block" /> : <Square size={20} className="hidden sm:block" />}
+                                            </button>
+                                        </td>
+                                        <td className="p-2 sm:p-4">
+                                            <div className="flex flex-col">
+                                                <span className="font-bold text-slate-900 leading-tight text-xs sm:text-sm">{item.name}</span>
+                                                <div className="flex flex-wrap items-center gap-x-2 sm:gap-x-3 gap-y-1 mt-1">
+                                                    <span className="text-xs sm:text-sm font-black text-slate-700 uppercase tracking-widest">{item.category}</span>
+                                                    {item.manufacturer && <span className="text-[8px] sm:text-[9px] text-slate-500 font-bold">{item.manufacturer}</span>}
+                                                    {item.location && (
+                                                        <div className="flex items-center gap-0.5 px-1 sm:px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded text-[8px] sm:text-[9px] font-black border border-indigo-100 uppercase tracking-wider">
+                                                            <MapPin size={7} className="sm:hidden" />
+                                                            <MapPin size={8} className="hidden sm:block" />
+                                                            {item.location}
+                                                        </div>
+                                                    )}
+                                                    <div className="flex items-center gap-1 bg-slate-100 px-1 sm:px-1.5 py-0.5 rounded shadow-sm border border-slate-200">
+                                                        <Package size={8} className="text-slate-500 sm:hidden" />
+                                                        <Package size={10} className="text-slate-500 hidden sm:block" />
+                                                        <span className="text-[9px] sm:text-[10px] font-black text-slate-700">在庫: {(item.quantity || 0).toLocaleString()} {item.unit || ''}</span>
                                                     </div>
-                                                )}
-                                                <div className="flex items-center gap-1 bg-slate-100 px-1 sm:px-1.5 py-0.5 rounded shadow-sm border border-slate-200">
-                                                    <Package size={8} className="text-slate-500 sm:hidden" />
-                                                    <Package size={10} className="text-slate-500 hidden sm:block" />
-                                                    <span className="text-[9px] sm:text-[10px] font-black text-slate-700">在庫: {(item.quantity || 0).toLocaleString()} {item.unit || ''}</span>
                                                 </div>
                                             </div>
-                                        </div>
-                                    </td>
-                                    <td className="p-2 sm:p-4">
-                                        <div className="flex flex-col">
-                                            <span className="text-xs sm:text-sm font-bold text-slate-800 truncate max-w-[100px] sm:max-w-[150px]">{item.model || '-'}</span>
-                                            <span className="text-xs sm:text-sm font-mono font-bold text-slate-700 mt-0.5">{item.dimensions || '-'}</span>
-                                        </div>
-                                    </td>
-                                    <td className="p-2 sm:p-4 text-right">
-                                        <div className="flex flex-col items-end gap-0.5 sm:gap-1">
-                                            <span className="text-[10px] sm:text-xs font-mono font-bold text-slate-600">
-                                                {item.listPrice > 0 ? `定¥${Math.floor(item.listPrice).toLocaleString()}` : 'OPEN'}
-                                            </span>
-                                            {item.previousListPrice && item.previousListPrice !== item.listPrice && (
-                                                <span className="text-[9px] sm:text-[10px] font-mono font-bold text-slate-400 line-through decoration-slate-300">
-                                                    定¥{Math.floor(item.previousListPrice).toLocaleString()}
+                                        </td>
+                                        <td className="p-2 sm:p-4">
+                                            <div className="flex flex-col">
+                                                <span className="text-xs sm:text-sm font-bold text-slate-800 truncate max-w-[100px] sm:max-w-[150px]">{item.model || '-'}</span>
+                                                <span className="text-xs sm:text-sm font-mono font-bold text-slate-700 mt-0.5">{item.dimensions || '-'}</span>
+                                            </div>
+                                        </td>
+                                        <td className="p-2 sm:p-4 text-right">
+                                            <div className="flex flex-col items-end gap-0.5 sm:gap-1">
+                                                <span className="text-[10px] sm:text-xs font-mono font-bold text-slate-600">
+                                                    {item.listPrice > 0 ? `定¥${Math.floor(item.listPrice).toLocaleString()}` : 'OPEN'}
                                                 </span>
-                                            )}
-                                            <span className="text-[9px] sm:text-[10px] font-mono font-bold text-slate-400">
-                                                (仕¥{(item.costPrice || 0).toLocaleString()})
-                                            </span>
-                                            {item.previousCostPrice && item.previousCostPrice !== item.costPrice && (
-                                                <span className="text-[9px] sm:text-[10px] font-mono font-bold text-slate-400 line-through decoration-slate-300">
-                                                    (仕¥{Math.floor(item.previousCostPrice).toLocaleString()})
-                                                </span>
-                                            )}
-                                        </div>
-                                    </td>
-                                    <td className="p-4 text-right">
-                                        <div className="flex flex-col items-end">
-                                            <span className="text-base font-mono font-black text-blue-700">¥{(appliedPrice || 0).toLocaleString()}</span>
-                                            <div className="flex flex-col items-end -mt-0.5">
-                                                {item.listPrice > 0 && (
-                                                    <span className="text-[9px] font-bold text-slate-400">
-                                                        (掛: {((appliedPrice / item.listPrice) * 100).toFixed(1)}%)
+                                                {item.previousListPrice && item.previousListPrice !== item.listPrice && (
+                                                    <span className="text-[9px] sm:text-[10px] font-mono font-bold text-slate-400 line-through decoration-slate-300">
+                                                        定¥{Math.floor(item.previousListPrice).toLocaleString()}
                                                     </span>
                                                 )}
-                                                {appliedPrice > 0 && item.costPrice > 0 && (
-                                                    <span className="text-[9px] font-bold text-emerald-600">
-                                                        (粗利: {(((appliedPrice - item.costPrice) / appliedPrice) * 100).toFixed(1)}%)
+                                                <span className="text-[9px] sm:text-[10px] font-mono font-bold text-slate-400">
+                                                    (仕¥{(item.costPrice || 0).toLocaleString()})
+                                                </span>
+                                                {item.previousCostPrice && item.previousCostPrice !== item.costPrice && (
+                                                    <span className="text-[9px] sm:text-[10px] font-mono font-bold text-slate-400 line-through decoration-slate-300">
+                                                        (仕¥{Math.floor(item.previousCostPrice).toLocaleString()})
                                                     </span>
                                                 )}
                                             </div>
-                                        </div>
-                                    </td>
-                                    <td className="p-4">
-                                        <div className="flex items-center justify-end gap-1">
-                                            <button
-                                                onClick={() => onAddToSlip(item, appliedPrice)}
-                                                className="p-2.5 bg-slate-900 text-white rounded-xl hover:bg-blue-600 transition-all shadow-md active:scale-90"
-                                            >
-                                                <Plus size={16} />
-                                            </button>
-                                            <button
-                                                onClick={() => onEdit(item)}
-                                                className="p-2.5 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl"
-                                            >
-                                                <Edit2 size={16} />
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            );
-                        })}
+                                        </td>
+                                        <td className="p-4 text-right">
+                                            <div className="flex flex-col items-end">
+                                                <span className="text-base font-mono font-black text-blue-700">¥{(appliedPrice || 0).toLocaleString()}</span>
+                                                <div className="flex flex-col items-end -mt-0.5">
+                                                    {item.listPrice > 0 && (
+                                                        <span className="text-[9px] font-bold text-slate-400">
+                                                            (掛: {((appliedPrice / item.listPrice) * 100).toFixed(1)}%)
+                                                        </span>
+                                                    )}
+                                                    {appliedPrice > 0 && item.costPrice > 0 && (
+                                                        <span className="text-[9px] font-bold text-emerald-600">
+                                                            (粗利: {(((appliedPrice - item.costPrice) / appliedPrice) * 100).toFixed(1)}%)
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="p-4">
+                                            <div className="flex items-center justify-end gap-1">
+                                                <button
+                                                    onClick={() => onAddToSlip(item, appliedPrice)}
+                                                    className="p-2.5 bg-slate-900 text-white rounded-xl hover:bg-blue-600 transition-all shadow-md active:scale-90"
+                                                >
+                                                    <Plus size={16} />
+                                                </button>
+                                                <button
+                                                    onClick={() => onEdit(item)}
+                                                    className="p-2.5 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl"
+                                                >
+                                                    <Edit2 size={16} />
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                );
+                            })
+                        )}
                     </tbody>
                 </table>
-                {items.length === 0 && (
-                    <div className="flex flex-col items-center justify-center py-32 text-slate-300">
-                        <Package size={64} className="mb-4 opacity-20" />
-                        <p className="font-black uppercase tracking-widest text-sm">資材が見つかりません</p>
-                    </div>
-                )}
             </div>
         </div>
     );
