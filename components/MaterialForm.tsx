@@ -98,15 +98,6 @@ export const MaterialForm: React.FC<MaterialFormProps> = ({ onSave, onClose, ini
     }
   };
 
-  // 補助計算用: 個別フィールドで%入力を反映させる
-  const updatePriceByRate = (target: 'cost' | 'selling', percent: string) => {
-    const listP = parseFloat(formData.listPrice) || 0;
-    if (listP <= 0) return;
-    const rate = parseFloat(percent) || 0;
-    const price = Math.round(listP * (rate / 100));
-    if (target === 'cost') setFormData(p => ({ ...p, costPrice: price.toString() }));
-    else setFormData(p => ({ ...p, sellingPrice: price.toString() }));
-  };
 
   // 有効な分類リスト: MATERIAL_CATEGORIES + settings.categoriesを重複なしでマージ
   const effectiveCategories = Array.from(new Set([
@@ -160,8 +151,6 @@ export const MaterialForm: React.FC<MaterialFormProps> = ({ onSave, onClose, ini
     onSave(currentData);
   };
 
-  const costRate = Number(formData.listPrice) > 0 ? ((Number(formData.costPrice) / Number(formData.listPrice)) * 100).toFixed(1) : '';
-  const sellRate = Number(formData.listPrice) > 0 ? ((Number(formData.sellingPrice) / Number(formData.listPrice)) * 100).toFixed(1) : '';
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-fade-in">
@@ -314,20 +303,12 @@ export const MaterialForm: React.FC<MaterialFormProps> = ({ onSave, onClose, ini
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">仕入値 <span className="text-red-500">*</span></label>
                 <div className="flex items-center gap-2">
                   <input type="number" name="costPrice" required value={formData.costPrice} onChange={e => setFormData(p => ({ ...p, costPrice: e.target.value }))} className="flex-1 px-4 py-3 bg-white border-2 border-slate-100 rounded-2xl font-mono font-bold focus:border-blue-500 outline-none transition-all" />
-                  <div className="relative w-20">
-                    <input type="number" value={costRate} onChange={e => updatePriceByRate('cost', e.target.value)} placeholder="掛%" className="w-full px-2 py-3 bg-slate-100 border-2 border-slate-100 rounded-2xl text-[10px] font-black text-slate-600 text-center outline-none focus:border-blue-400" />
-                    <span className="absolute right-1 bottom-1 text-[8px] text-slate-400 font-bold">%</span>
-                  </div>
                 </div>
               </div>
               <div className="space-y-1.5">
                 <label className="text-[10px] font-black text-blue-600 uppercase tracking-widest">標準売値 <span className="text-red-500">*</span></label>
                 <div className="flex items-center gap-2">
                   <input type="number" name="sellingPrice" required value={formData.sellingPrice} onChange={e => setFormData(p => ({ ...p, sellingPrice: e.target.value }))} className="flex-1 px-4 py-3 border-2 border-blue-200 rounded-2xl font-mono font-bold text-blue-700 bg-blue-50 focus:border-blue-500 outline-none transition-all shadow-sm" />
-                  <div className="relative w-20">
-                    <input type="number" value={sellRate} onChange={e => updatePriceByRate('selling', e.target.value)} placeholder="掛%" className="w-full px-2 py-3 bg-blue-100 border-2 border-blue-100 rounded-2xl text-[10px] font-black text-blue-600 text-center outline-none focus:border-blue-400" />
-                    <span className="absolute right-1 bottom-1 text-[8px] text-blue-400 font-bold">%</span>
-                  </div>
                 </div>
               </div>
             </div>

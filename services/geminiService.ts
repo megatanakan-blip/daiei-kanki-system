@@ -261,6 +261,21 @@ const buildSmartKnowledgeBase = (masterItems: Material[], messages: any[]) => {
   const userText = lastUserMsg?.parts?.[0]?.text || '';
   const searchTerms = expandSearchTerms(userText);
 
+  // ===== 戦略1: 写真（画像）が含まれる場合 → 全件マスターを渡す（最大500件） =====
+  const hasImage = messages.some(m => m.parts.some((p: any) => p.inlineData));
+  if (hasImage) {
+    return masterItems.slice(0, 500).map(i => ({
+      id: i.id,
+      name: i.name,
+      model: i.model,
+      dims: i.dimensions,
+      price: i.sellingPrice,
+      cost: i.costPrice,
+      unit: i.unit,
+      cat: i.category
+    }));
+  }
+
   const scored: { item: Material; score: number }[] = [];
   const matchedCategories = new Set<string>();
 
@@ -295,12 +310,10 @@ const buildSmartKnowledgeBase = (masterItems: Material[], messages: any[]) => {
   scored.sort((a, b) => b.score - a.score);
 
   // 1. スコアあり (全件) + 2. 同カテゴリ他商品 (最大150件) + 3. その他 (50件)
-  // 画像がある場合は、より広範囲にアイテムを含める（解析漏れ対策）
-  const hasImage = messages.some(m => m.parts.some((p: any) => p.inlineData));
   const combined = [
     ...scored.map(s => s.item),
     ...categoryFollowers.slice(0, 150),
-    ...masterItems.filter(i => !scored.some(s => s.item.id === i.id) && !categoryFollowers.some(cf => cf.id === i.id)).slice(0, hasImage ? 100 : 50)
+    ...masterItems.filter(i => !scored.some(s => s.item.id === i.id) && !categoryFollowers.some(cf => cf.id === i.id)).slice(0, 50)
   ];
 
   return combined.map(i => ({
@@ -342,26 +355,31 @@ export const chatWithTakahashi = async (messages: any[], masterItems: Material[]
        - **絶対に「ありません」と言って話を終わらせないでください。** プロとして、代替案や近い仕様のものを探し出すのがあなたの仕事です。
        - 特に「エル」→「90L」、「ティー」→「チーズ」、「白管」→「白SGP」など、現場用語からの読み替えは瞬時に行って提案してください。
 
-    2. **現場用語→正式名称の変換**:
-       - 「エル」「エルボ」→「90L」「90°L」「L」「LD」「LS」などを検索
-       - 「ティー」「ティ」→「チーズ」「T」「TJ」を検索
-       - 「白ガス管」「白管」→「白SGP」「SGP白」を検索
-       - 「黒管」「黒ガス管」→「黒SGP」「SGP黒」「配管用炭素鋼鋼管」を検索
-       - 「モルコ管」「モルコ」→「SU」「SUS」「ステンレス配管」を検索
-       - 「パイレン」→「パイプレンチ」を検索
-       - 「全ねじ」「寸切り」→「寸切りボルト」「全ネジ」を検索
-       - 「ソケ」→「ソケット」、「ニプ」→「ニップル」を検索
-       - **知識リスト（knowledgeBase）に商品がある場合はIDを必ず使用する。ただし、このIDは[ACTION]コマンド内でのみ使用し、ユーザーへの返信テキスト（説明文）には絶対に含めないでください。IDをユーザーに見せるのは非常に不格好で失礼にあたります。**
+    2. **写真・メモの読み取りとマスター照合（LINK同様の鉄則）**:
+       写真やメモを解析して伝票作成・見積作成を行う際は、以下の「業界常識」を適用し、**必ずknowledgeBase内の商品と一致させてください。**
 
-    3. **提案の仕方**:
-       - 曖昧な指定の場合は、「もしかしてこの[品名]のことかい？」と具体的に型番やサイズを挙げて確認してください。
-       - 複数候補があるなら「いくつかあるけど、どっちのサイズだい？」と親身に聞いてください。
+       【業界常識マッピング】
+       - 「白管」「白ガス管」「白パイプ」= 白SGP（亜鉛メッキ鋼管）
+       - 「黒管」「黒ガス管」「黒パイプ」= 黒SGP（配管用炭素鋼鋼管）
+       - 「L」= エルボ (90L)
+       - 「S」= ソケット
+       - 「T」= チーズ
+       - 「50A」「50」などの寸法表記のブレは同一視すること。
 
-    2. **トラブルシューティング**:
+    3. **COREマスター優先原則**:
+       - アクション（ADD_CART, CREATE_ESTIMATE等）を実行する際は、**必ず知識リスト（knowledgeBase）の中から最も仕様が近い商品を探し出し、そのIDを必ず使用してください。**
+       - 知識リストにある商品に関わらず、ユーザーが書いた元のテキストをそのまま品名にするのは避けてください。
+       - 知識リストにない新商品の場合のみ、IDを「新規」または空欄にして詳細を記述してください。
+
+    4. **IDの扱い**:
+       - **知識リスト（knowledgeBase）のIDは[ACTION]コマンド内でのみ使用してください。**
+       - ユーザーへの返信テキスト（説明文）には絶対にIDを含めないでください。IDをユーザーに見せるのは不格好で失礼にあたります。
+
+    5. **トラブルシューティング**:
        - ユーザーが「ダイキンのU0が出た」と言ったら、即座に「ガス欠（冷媒不足）の可能性がありますね。配管のガス漏れチェックが必要かもしれません」と回答してください。
        - 単にエラーの意味を伝えるだけでなく、「まずフィルターを見てください」「ブレーカーを一回落としてみてください」など、現場でできる一次対応をアドバイスしてください。
 
-    3. **アクション（通常業務）**:
+    6. **アクション（通常業務）**:
        currentScreen【${screenContext}】に応じて、適切にアクションを実行してください。
     
     【アクション優先度（超重要）】

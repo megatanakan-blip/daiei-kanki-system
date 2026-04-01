@@ -206,7 +206,16 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                                 <p>{info.postalCode} {info.address}</p>
                                 <p className="mt-1 font-bold">TEL: {info.phone} / FAX: {info.fax}</p>
                                 <p className="font-bold">登録番号: {info.invoiceNumber}</p>
-                                <p className="mt-1 text-slate-500">発行日: {new Date().toLocaleDateString('ja-JP')}</p>
+                                <p className="mt-1 text-slate-500 flex items-center justify-end gap-2">
+                                    発行日: 
+                                    <input 
+                                        type="date" 
+                                        value={slip.date || new Date().toISOString().split('T')[0]} 
+                                        onChange={(e) => onUpdateSlip?.({ date: e.target.value })}
+                                        className="bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-0.5 text-right w-32 print:hidden cursor-pointer hover:bg-slate-100"
+                                    />
+                                    <span className="hidden print:block">{slip.date ? new Date(slip.date).toLocaleDateString('ja-JP') : new Date().toLocaleDateString('ja-JP')}</span>
+                                </p>
                             </div>
                         </div>
                     </div>
@@ -332,7 +341,18 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
             <div className="flex-1 overflow-hidden flex flex-col">
                 <div className="flex justify-between items-end border-b-2 border-slate-900 pb-2 mb-3">
                     <h1 className={`text-2xl font-serif font-bold tracking-widest ${isReturn ? 'text-red-700' : ''}`}>{getSlipLabel(slip.type, slip.constructionName)}</h1>
-                    <div className="text-right font-mono text-xs"><p className="font-bold">No. {slip.slipNumber || 'PENDING'}</p><p>{slip.date}</p></div>
+                    <div className="text-right font-mono text-xs">
+                        <p className="font-bold">No. {slip.slipNumber || 'PENDING'}</p>
+                        <div className="flex items-center justify-end gap-1">
+                            <input 
+                                type="date" 
+                                value={slip.date || ''} 
+                                onChange={(e) => onUpdateSlip?.({ date: e.target.value })}
+                                className="bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-0.5 text-right w-24 print:hidden cursor-pointer hover:bg-slate-50"
+                            />
+                            <p className="hidden print:block">{slip.date}</p>
+                        </div>
+                    </div>
                 </div>
                 <div className="flex justify-between items-start mb-3">
                     <div className="w-[60%]">
@@ -1089,11 +1109,19 @@ export const SlipManager: React.FC<{
     const handleInvoiceIssuance = (cName: string, targetSite: string | null, allSlipsForCustomer: Slip[]) => {
         const closingDay = customers.find(c => c.name === cName)?.closingDay || 99;
         const [y, m] = targetMonth.split('-').map(Number);
+        
+        // 発行日（締日）の計算
+        const lastDayOfMonth = new Date(y, m, 0).getDate();
+        const invoiceDay = (closingDay === 99 || closingDay > lastDayOfMonth) ? lastDayOfMonth : closingDay;
+        const calculatedInvoiceDate = `${y}-${String(m).padStart(2, '0')}-${String(invoiceDay).padStart(2, '0')}`;
+
         let start: string, end: string;
         if (closingDay === 99) { start = `${y}-${String(m).padStart(2, '0')}-01`; end = `${y}-${String(m).padStart(2, '0')}-31`; }
         else {
             const [py, pm] = m === 1 ? [y - 1, 12] : [y, m - 1];
-            start = `${py}-${String(pm).padStart(2, '0')}-${String(closingDay + 1).padStart(2, '0')}`;
+            const pLastDay = new Date(py, pm, 0).getDate();
+            const startDay = Math.min(closingDay + 1, pLastDay);
+            start = `${py}-${String(pm).padStart(2, '0')}-${String(startDay).padStart(2, '0')}`;
             end = `${y}-${String(m).padStart(2, '0')}-${String(closingDay).padStart(2, '0')}`;
         }
         const validSlips = allSlipsForCustomer.filter(s => s.date >= start && s.date <= end && (s.type === 'provisional' || s.type === 'return'));
@@ -1138,7 +1166,7 @@ export const SlipManager: React.FC<{
         if (!targetSite) {
             allDocs.push({
                 id: 'cover-' + Date.now(), customerName: cName, constructionName: '全現場一括集計', items: [], totalAmount: totalNet,
-                taxAmount: totalTax, grandTotal: totalNet + totalTax, date: new Date().toISOString().slice(0, 10), type: 'cover',
+                taxAmount: totalTax, grandTotal: totalNet + totalTax, date: calculatedInvoiceDate, type: 'cover',
                 createdAt: Date.now(), siteSummaries: siteEntries.map(([name, total]) => ({ name, total })), deliveryTime: 'none', deliveryDestination: 'none',
                 slipNumber: `INV-${targetMonth.replace('-', '')}`, isClosed: true,
                 previousBillingAmount: 0, paymentReceived: 0, carriedForwardAmount: 0
@@ -1151,7 +1179,7 @@ export const SlipManager: React.FC<{
             const sNet = sItems.reduce((acc, b) => acc + ((b.appliedPrice || 0) * (b.deliveredQuantity || 0)), 0);
             const sTax = Math.round(sNet * 0.1);
             const siteSlipNo = `DET-${targetMonth.replace('-', '')}-${sName.substring(0, 4)}`;
-            const baseMeta: any = { customerName: cName, constructionName: sName, totalAmount: sNet, taxAmount: sTax, grandTotal: sNet + sTax, date: new Date().toISOString().slice(0, 10), createdAt: Date.now(), isClosed: true, slipNumber: siteSlipNo };
+            const baseMeta: any = { customerName: cName, constructionName: sName, totalAmount: sNet, taxAmount: sTax, grandTotal: sNet + sTax, date: calculatedInvoiceDate, createdAt: Date.now(), isClosed: true, slipNumber: siteSlipNo };
             allDocs.push({ ...baseMeta, id: 'site-cover-' + sName, type: 'cover' });
             // 納品明細書 (日付別分割表示)
             const dateGroups = new Map<string, (SlipItem & { sourceSlipNo?: string })[]>();
