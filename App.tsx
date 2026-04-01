@@ -16,7 +16,7 @@ import { AITakahashi } from './components/AITakahashi';
 import { LinkUserManagement } from './components/LinkUserManagement';
 import { generateMaterialsFromFile } from './services/geminiService';
 import * as storage from './services/firebaseService';
-import { normalizeForSearch, filterAndSortItems } from './services/searchUtils';
+import { normalizeForSearch, filterAndSortItems, getAppliedPrice } from './services/searchUtils';
 
 const App: React.FC = () => {
     const [items, setItems] = useState<MaterialItem[]>([]);
@@ -327,7 +327,9 @@ const App: React.FC = () => {
                         onAddToCart={newItems => {
                             const slipItems: SlipItem[] = newItems.map(ni => {
                                 const master = items.find(i => i.id === ni.id);
-                                return { ...ni, id: master?.id || `ai-${Date.now()}`, category: master?.category || '消耗品・雑材', appliedPrice: master?.sellingPrice || 0, updatedAt: Date.now() } as SlipItem;
+                                // 顧客・現場ルールを適用した最新単価を算出
+                                const price = master ? getAppliedPrice(master, activeCustomer, activeSite, pricingRules) : (ni.appliedPrice || 0);
+                                return { ...ni, id: master?.id || `ai-${Date.now()}`, category: master?.category || '消耗品・雑材', appliedPrice: price, updatedAt: Date.now() } as SlipItem;
                             });
                             setCart(prev => [...prev, ...slipItems]);
                             setSlipManagerInitialTab('create');
@@ -347,10 +349,17 @@ const App: React.FC = () => {
                             const valid = new Date(); valid.setDate(today.getDate() + 30);
                             const newEst: Omit<Estimate, 'id'> = {
                                 createdAt: Date.now(), date: today.toISOString().slice(0, 10), validUntil: valid.toISOString().slice(0, 10),
-                                customerName: activeCustomer || '（要確認）', constructionName: activeSite || '', items: items.map(i => ({ ...i, deliveredQuantity: 0, updatedAt: Date.now() })),
-                                totalAmount: items.reduce((s, i) => s + (i.appliedPrice * i.quantity), 0), taxAmount: 0, grandTotal: 0, status: 'pending', deliveryTime: 'none', deliveryDestination: 'none',
+                                customerName: activeCustomer || '（要確認）', constructionName: activeSite || '', 
+                                items: items.map(i => {
+                                    const master = items.find(mi => mi.id === i.id);
+                                    const price = master ? getAppliedPrice(master as any, activeCustomer, activeSite, pricingRules) : (i.appliedPrice || 0);
+                                    return { ...i, appliedPrice: price, deliveredQuantity: 0, updatedAt: Date.now() };
+                                }),
+                                totalAmount: 0, taxAmount: 0, grandTotal: 0, status: 'pending', deliveryTime: 'none', deliveryDestination: 'none',
                                 slipNumber: `EST-${Math.random().toString(36).substring(2, 8).toUpperCase()}`
                             };
+                            // 再計算した合計をセット
+                            newEst.totalAmount = newEst.items.reduce((s, i) => s + (i.appliedPrice * i.quantity), 0);
                             await storage.addEstimate(newEst);
                             setIsEstimateManagerOpen(true);
                         }}
@@ -371,7 +380,7 @@ const App: React.FC = () => {
                                     <Plus size={18} /> <span className="hidden md:inline">資材新規登録</span>
                                 </button>
                                 <button onClick={() => setIsPricingManagerOpen(true)} className="flex items-center gap-2 bg-indigo-600 text-white p-3 md:px-6 md:py-3 rounded-2xl text-xs font-black shadow-lg hover:bg-indigo-700 transition-all active:scale-95">
-                                    <UserCheck size={18} /> <span className="hidden md:inline">顧客別単価</span>
+                                    <UserCheck size={18} /> <span className="hidden md:inline">顧客設定</span>
                                 </button>
                                 <button onClick={() => setIsPOManagerOpen(true)} className="flex items-center gap-2 bg-emerald-600 text-white p-3 md:px-6 md:py-3 rounded-2xl text-xs font-black shadow-lg hover:bg-emerald-700 transition-all active:scale-95">
                                     <ShoppingCart size={18} /> <span className="hidden md:inline">発注・入荷管理</span>

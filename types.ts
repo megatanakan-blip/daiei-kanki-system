@@ -77,7 +77,9 @@ export interface PricingRule {
   siteName?: string;
   category: string;
   model: string;
-  method: 'percent_of_list' | 'markup_on_cost';
+  materialId?: string; // 特定の資材を指定する場合
+  materialName?: string; // 表示用名称
+  method: 'percent_of_list' | 'markup_on_cost' | 'fixed_price';
   value: number;
 }
 

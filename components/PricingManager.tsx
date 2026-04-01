@@ -28,28 +28,43 @@ export const PricingManager = ({ rules, customers, items, onClose }: PricingMana
     const [modelFilterQuery, setModelFilterQuery] = useState('');
     const [isSaving, setIsSaving] = useState(false);
 
-    const uniqueModelsByCategory = useMemo((): Record<string, string[]> => {
-        const mapping: Record<string, string[]> = {};
-        MATERIAL_CATEGORIES.forEach(cat => mapping[cat] = []);
-        items.forEach(item => {
-            const cat = item.category || "その他管";
-            const mod = item.model || "";
-            if (mod && mapping[cat] && !mapping[cat].includes(mod)) mapping[cat].push(mod);
-        });
-        Object.keys(mapping).forEach(k => mapping[k].sort());
-        return mapping;
+    const allCategoriesInMaster = useMemo(() => {
+        const cats = new Set<string>();
+        items.forEach(item => { if (item.category) cats.add(item.category); });
+        // 基本カテゴリリストにないものも含めてマージし、ソートする
+        return Array.from(new Set([...Array.from(cats)])).sort();
     }, [items]);
 
-    const filteredModelsByCategory = useMemo((): Record<string, string[]> => {
-        if (!modelFilterQuery) return uniqueModelsByCategory;
-        const query = modelFilterQuery.toLowerCase();
-        const mapping: Record<string, string[]> = {};
-        MATERIAL_CATEGORIES.forEach(cat => {
-            if (cat.toLowerCase().includes(query)) mapping[cat] = uniqueModelsByCategory[cat];
-            else mapping[cat] = (uniqueModelsByCategory[cat] || []).filter(m => m.toLowerCase().includes(query));
+    const uniqueItemsByCategory = useMemo((): Record<string, { label: string, id: string, model: string }[]> => {
+        const mapping: Record<string, { label: string, id: string, model: string }[]> = {};
+        allCategoriesInMaster.forEach(cat => mapping[cat] = []);
+        items.forEach(item => {
+            const cat = item.category || "その他管";
+            const label = item.model ? `${item.name} (${item.model})` : item.name;
+            if (!mapping[cat]) mapping[cat] = [];
+            mapping[cat].push({ label, id: item.id, model: item.model || "" });
+        });
+        Object.keys(mapping).forEach(k => mapping[k].sort((a, b) => a.label.localeCompare(b.label)));
+        return mapping;
+    }, [items, allCategoriesInMaster]);
+
+    const filteredItemsByCategory = useMemo(() => {
+        const mapping: Record<string, { label: string, id: string, model: string }[]> = {};
+        allCategoriesInMaster.forEach(cat => {
+            const list = uniqueItemsByCategory[cat] || [];
+            if (!modelFilterQuery) {
+                mapping[cat] = list;
+            } else {
+                const query = modelFilterQuery.toLowerCase();
+                if (cat.toLowerCase().includes(query)) {
+                    mapping[cat] = list;
+                } else {
+                    mapping[cat] = list.filter(m => m.label.toLowerCase().includes(query) || m.model.toLowerCase().includes(query));
+                }
+            }
         });
         return mapping;
-    }, [uniqueModelsByCategory, modelFilterQuery]);
+    }, [uniqueItemsByCategory, modelFilterQuery, allCategoriesInMaster]);
 
     // 表示用：1社目のルールを表示（一括設定時も参考にできるように）
     const referenceRules = useMemo(() => {
@@ -97,7 +112,7 @@ export const PricingManager = ({ rules, customers, items, onClose }: PricingMana
     const handleSaveRules = async () => {
         if (!value) return alert('パーセント（値）を入力してください。');
         if (checkedCategories.size === 0 && checkedModels.size === 0) {
-            return alert('設定対象のカテゴリーまたは型式を最低1つ選択してください。');
+            return alert('設定対象のカテゴリーまたは資材を最低1つ選択してください。');
         }
 
         setIsSaving(true);
@@ -117,16 +132,20 @@ export const PricingManager = ({ rules, customers, items, onClose }: PricingMana
                         value: numValue
                     });
                 });
-                checkedModels.forEach(key => {
-                    const [cat, mod] = key.split(':');
-                    newRules.push({
-                        customerName: customer.name,
-                        siteName: site,
-                        category: cat,
-                        model: mod,
-                        method,
-                        value: numValue
-                    });
+                checkedModels.forEach(mId => {
+                    const item = items.find(i => i.id === mId);
+                    if (item) {
+                        newRules.push({
+                            customerName: customer.name,
+                            siteName: site,
+                            category: item.category,
+                            model: item.model || '',
+                            materialId: item.id,
+                            materialName: item.name,
+                            method,
+                            value: numValue
+                        });
+                    }
                 });
             });
 
@@ -170,7 +189,7 @@ export const PricingManager = ({ rules, customers, items, onClose }: PricingMana
         return (
             <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
                 <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
-                    <div className="p-6 border-b flex justify-between items-center"><h2 className="text-xl font-bold flex items-center gap-3"><Users size={24} className="text-blue-600" /> 顧客管理・ルール設定</h2><button onClick={onClose}><X size={24} /></button></div>
+                    <div className="p-6 border-b flex justify-between items-center"><h2 className="text-xl font-bold flex items-center gap-3"><Users size={24} className="text-blue-600" /> 顧客設定・単価管理</h2><button onClick={onClose}><X size={24} /></button></div>
                     <div className="p-8 bg-slate-50 flex flex-col gap-8 overflow-y-auto">
                         <div className="bg-white p-6 rounded-xl border border-blue-200">
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-2">新しい顧客を登録</label>
@@ -254,82 +273,57 @@ export const PricingManager = ({ rules, customers, items, onClose }: PricingMana
                     <div className="flex items-center gap-4"><button onClick={() => setView('list')} className="flex items-center gap-1 text-slate-500 font-bold"><ArrowLeft size={20} /> 戻る</button><h2 className="text-xl font-bold">{targetCustomers.length > 1 ? `${targetCustomers.length}社を一括設定中` : targetCustomers[0].name}</h2></div>
                     <button onClick={onClose}><X size={24} /></button>
                 </div>
-                <div className="flex-grow flex flex-col md:flex-row overflow-hidden">
-                    <div className="md:w-7/12 flex flex-col border-r bg-slate-50">
-                        <div className="p-6 border-b bg-white space-y-4 shadow-sm">
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div>
-                                    <label className="text-xs font-bold text-slate-500 block mb-1 flex items-center gap-1"><MapPin size={12} /> 適用現場 (空欄で共通)</label>
-                                    <input
-                                        type="text"
-                                        list="site-suggestions"
-                                        value={siteNameInput}
-                                        onChange={e => setSiteNameInput(e.target.value)}
-                                        placeholder="現場名を入力または選択"
-                                        className="w-full px-3 py-2 border-2 border-slate-100 rounded-lg font-bold focus:border-blue-400 outline-none transition-all"
-                                    />
-                                    <datalist id="site-suggestions">
-                                        {existingSites.map(s => <option key={s} value={s} />)}
-                                    </datalist>
-                                </div>
-                                <div><label className="text-xs font-bold text-slate-500 block mb-1">計算方法</label><select value={method} onChange={e => setMethod(e.target.value as any)} className="w-full px-3 py-2 border rounded-lg font-bold"><option value="percent_of_list">定価の掛率 (%)</option><option value="markup_on_cost">仕入の上乗 (%)</option></select></div>
-                                <div><label className="text-xs font-bold text-slate-500 block mb-1">値 (%)</label><input type="number" value={value} onChange={e => setValue(e.target.value)} placeholder="55" className="w-full px-3 py-2 border rounded-lg font-bold text-lg" /></div>
-                            </div>
-                            <div className="relative"><Search className="absolute left-3 top-2.5 text-slate-400" size={16} /><input type="text" value={modelFilterQuery} onChange={e => setModelFilterQuery(e.target.value)} placeholder="分類・型式を絞り込み..." className="w-full pl-9 pr-3 py-2 border rounded-lg text-sm" /></div>
-
-                            <div className="flex gap-2 items-center bg-blue-50 p-2 rounded-lg border border-blue-100">
-                                <AlertCircle size={14} className="text-blue-500" />
-                                <span className="text-[10px] font-bold text-blue-700">下記リストからチェックを入れて「適用」を押してください</span>
-                            </div>
+                <div className="flex-grow flex flex-col overflow-hidden bg-slate-50">
+                    <div className="p-8 space-y-4 overflow-y-auto">
+                        <div className="flex justify-between items-center border-b pb-4">
+                            <h3 className="font-bold text-slate-700 flex items-center gap-2"><Tag size={20} className="text-blue-500" /> 設定済みの単価ルール一覧</h3>
+                            {targetCustomers.length > 1 ? (
+                                <span className="text-[10px] font-black text-blue-600 bg-blue-100 px-3 py-1 rounded-full uppercase tracking-widest">{targetCustomers.length}社を同時表示中</span>
+                            ) : (
+                                <span className="text-xs font-bold text-slate-400">※ 単価の新規設定は、マスター管理画面の表から直接行えます</span>
+                            )}
                         </div>
-                        <div className="flex-grow overflow-y-auto p-6 space-y-3">
-                            {MATERIAL_CATEGORIES.map(cat => {
-                                const models = filteredModelsByCategory[cat] || [];
-                                if (models.length === 0 && !cat.toLowerCase().includes(modelFilterQuery.toLowerCase())) return null;
-                                const isExpanded = expandedCategories.has(cat);
-                                return (
-                                    <div key={cat} className={`bg-white rounded-lg border transition-all ${checkedCategories.has(cat) ? 'ring-2 ring-blue-500' : ''}`}>
-                                        <div className="flex items-center p-3 cursor-pointer" onClick={() => { const n = new Set(expandedCategories); if (n.has(cat)) n.delete(cat); else n.add(cat); setExpandedCategories(n); }}>
-                                            <button onClick={(e) => { e.stopPropagation(); const n = new Set(checkedCategories); if (n.has(cat)) n.delete(cat); else n.add(cat); setCheckedCategories(n); }} className="mr-3">{checkedCategories.has(cat) ? <CheckSquare size={20} className="text-blue-600" /> : <Square size={20} className="text-slate-300" />}</button>
-                                            <span className="font-bold flex-grow">{cat}</span>
-                                            {isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {Object.entries(groupedRulesBySite).length > 0 ? (
+                                Object.entries(groupedRulesBySite).map(([site, cats]) => (
+                                    <div key={site} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                                        <div className="bg-slate-50 p-3 text-xs font-bold border-b flex items-center gap-2 text-slate-600">
+                                            <MapPin size={14} className="text-blue-500" /> {site === 'BASE_COMMON' ? '共通設定 (現場指定なし)' : site}
                                         </div>
-                                        {isExpanded && models.length > 0 && (
-                                            <div className="border-t bg-slate-50 p-4 grid grid-cols-2 gap-3">
-                                                {models.map(model => {
-                                                    const key = `${cat}:${model}`;
-                                                    return <div key={model} onClick={() => { const n = new Set(checkedModels); if (n.has(key)) n.delete(key); else n.add(key); setCheckedModels(n); }} className={`flex items-center gap-2 p-2 rounded-lg border bg-white cursor-pointer hover:border-blue-300 transition-colors ${checkedModels.has(key) ? 'border-blue-400 text-blue-700 bg-blue-50 shadow-sm' : ''}`}>{checkedModels.has(key) ? <CheckSquare size={16} /> : <Square size={16} />}<span className="font-bold text-xs truncate">{model}</span></div>
-                                                })}
-                                            </div>
-                                        )}
+                                        <div className="p-3 space-y-2 max-h-[300px] overflow-y-auto">
+                                            {Object.entries(cats).map(([cat, rs]) => rs.map(r => (
+                                                <div key={r.id} className="flex justify-between items-center text-xs p-2 bg-slate-50/50 rounded-lg border border-slate-100 group">
+                                                    <div className="flex flex-col min-w-0">
+                                                        <span className="font-bold text-slate-700 truncate">{r.materialName || (r.model === 'All' ? cat : `${cat} (${r.model})`)}</span>
+                                                        {r.materialId && <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest leading-none">個別指定</span>}
+                                                    </div>
+                                                    <div className="flex gap-3 items-center shrink-0">
+                                                        <div className="bg-white px-2 py-0.5 rounded border border-slate-200 font-mono font-bold text-blue-600">
+                                                            {r.method === 'fixed_price' ? `¥${r.value.toLocaleString()}` : 
+                                                             (r.method === 'percent_of_list' ? `${r.value}% (定価)` : `${r.value}% (原価加算)`)}
+                                                        </div>
+                                                        <button onClick={() => storage.deletePricingRule(r.id)} className="text-slate-300 hover:text-red-500 transition-colors p-1.5 hover:bg-red-50 rounded-md">
+                                                            <Trash2 size={14} />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )))}
+                                        </div>
                                     </div>
-                                );
-                            })}
-                        </div>
-                        <div className="p-4 border-t bg-white"><button onClick={handleSaveRules} disabled={isSaving} className={`w-full py-4 bg-blue-600 text-white font-black rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-3 uppercase tracking-widest ${isSaving ? 'opacity-50' : ''}`}>
-                            {isSaving ? <Loader2 size={20} className="animate-spin" /> : <Save size={20} />}
-                            {isSaving ? '保存中...' : '単価ルールを適用する'}
-                        </button></div>
-                    </div>
-                    <div className="md:w-5/12 bg-white border-l overflow-y-auto p-6 space-y-4">
-                        <div className="flex justify-between items-center border-b pb-2">
-                            <h3 className="font-bold text-slate-700">現在の登録状況</h3>
-                            {targetCustomers.length > 1 && <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-1 rounded">1社目のデータを参照中</span>}
-                        </div>
-                        {Object.entries(groupedRulesBySite).map(([site, cats]) => (
-                            <div key={site} className="border rounded-lg mb-4 bg-slate-50/30 overflow-hidden">
-                                <div className="bg-slate-100 p-2 text-xs font-bold border-b flex items-center gap-1 text-slate-600">
-                                    <MapPin size={10} /> {site === 'BASE_COMMON' ? '共通設定 (現場指定なし)' : site}
+                                ))
+                            ) : (
+                                <div className="col-span-full py-32 flex flex-col items-center justify-center text-slate-300 gap-4">
+                                    <div className="p-6 bg-slate-100 rounded-full">
+                                        <Tag size={48} className="opacity-20" />
+                                    </div>
+                                    <div className="text-center">
+                                        <p className="font-black uppercase tracking-[0.2em] mb-1">登録済みのルールがありません</p>
+                                        <p className="text-xs font-bold text-slate-400">マスター管理画面の表から資材を選んで「ルールとして保存」してください</p>
+                                    </div>
                                 </div>
-                                <div className="p-2 space-y-1">{Object.entries(cats).map(([cat, rs]) => rs.map(r => (<div key={r.id} className="flex justify-between items-center text-xs py-1.5 px-2 bg-white rounded border border-slate-100 mb-1"><span>{r.model === 'All' ? cat : `${cat} (${r.model})`}</span><div className="flex gap-2 items-center"><span className="font-mono font-bold text-blue-600">{r.value}%</span><button onClick={() => storage.deletePricingRule(r.id)} className="text-slate-300 hover:text-red-500 transition-colors p-1"><Trash2 size={12} /></button></div></div>)))}</div>
-                            </div>
-                        ))}
-                        {Object.keys(groupedRulesBySite).length === 0 && (
-                            <div className="text-center py-20 text-slate-300 flex flex-col items-center gap-2">
-                                <Tag size={40} className="opacity-10" />
-                                <p className="text-xs font-bold uppercase tracking-widest">設定がありません</p>
-                            </div>
-                        )}
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>

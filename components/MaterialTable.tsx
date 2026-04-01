@@ -1,4 +1,6 @@
 import React from 'react';
+import { normalizeForSearch, filterAndSortItems, getAppliedPrice } from '../services/searchUtils';
+import * as storage from '../services/firebaseService';
 import {
     MaterialItem,
     SortConfig,
@@ -66,16 +68,90 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
     const [filters, setFilters] = React.useState({ category: '', name: '', manufacturer: '', model: '', location: '' });
     const [showRevisedOnly, setShowRevisedOnly] = React.useState(false); // 価格改定ありのみ表示
     const [calcRate, setCalcRate] = React.useState<string>('');
-    const [calcType, setCalcType] = React.useState<'list_selling_rate' | 'list_cost_rate' | 'cost_markup' | 'cost_rate'>('list_selling_rate');
+    const [calcType, setCalcType] = React.useState<'list_selling_rate' | 'list_cost_rate' | 'cost_markup' | 'cost_rate' | 'fixed'>('list_selling_rate');
     const [isProcessing, setIsProcessing] = React.useState(false);
+    const [editingPriceId, setEditingPriceId] = React.useState<string | null>(null);
+    const [editingListPriceId, setEditingListPriceId] = React.useState<string | null>(null);
+    const [tempPrice, setTempPrice] = React.useState<string>('');
+    const [tempListPrice, setTempListPrice] = React.useState<string>('');
+
+    const handlePriceUpdate = async (item: MaterialItem, value: string) => {
+        const price = parseFloat(value);
+        if (isNaN(price)) return;
+        if (!activeCustomer) return;
+
+        try {
+            await storage.addPricingRule({
+                customerName: activeCustomer,
+                siteName: activeSite || '',
+                category: item.category,
+                model: item.model || '',
+                materialId: item.id,
+                materialName: item.name,
+                method: 'fixed_price',
+                value: price
+            });
+            setEditingPriceId(null);
+        } catch (e) {
+            alert("単価ルールの保存に失敗しました。");
+        }
+    };
+
+    const handleListPriceUpdate = async (item: MaterialItem, value: string) => {
+        const price = parseFloat(value);
+        if (isNaN(price)) {
+            setEditingListPriceId(null);
+            return;
+        }
+
+        try {
+            // マスターの情報を直接更新する
+            await onBulkUpdate([{ id: item.id, data: { listPrice: price, previousListPrice: item.listPrice, priceUpdatedDate: new Date().toISOString() } }]);
+            setEditingListPriceId(null);
+        } catch (e) {
+            alert("定価の更新に失敗しました。");
+        }
+    };
 
     const handleBulkCalc = async () => {
         const rate = parseFloat(calcRate);
         if (isNaN(rate)) return alert("有効な数値を入力してください");
 
+        if (activeCustomer) {
+            // 顧客が選択されている場合は、マスターの更新ではなく「単価ルール」として保存する
+            if (!window.confirm(`【確認】選択した${selectedIds.size}件を、${activeCustomer}（現場: ${activeSite || '共通'}）の「個別単価ルール」として保存しますか？\n（マスターの標準価格は変更されません）`)) return;
+            
+            setIsProcessing(true);
+            try {
+                const newRules: Omit<PricingRule, 'id'>[] = items.filter(i => selectedIds.has(i.id)).map(item => ({
+                    customerName: activeCustomer,
+                    siteName: activeSite || '',
+                    category: item.category,
+                    model: item.model || '',
+                    materialId: item.id,
+                    materialName: item.name,
+                    method: calcType === 'fixed' ? 'fixed_price' : (calcType === 'cost_markup' || calcType === 'cost_rate' ? 'markup_on_cost' : 'percent_of_list'),
+                    value: rate
+                }));
+
+                await Promise.all(newRules.map(r => storage.addPricingRule(r)));
+                alert(`${activeCustomer}の個別単価ルールを保存しました。`);
+            } catch (e) {
+                alert("ルールの保存中にエラーが発生しました。");
+            } finally {
+                setIsProcessing(false);
+            }
+            return;
+        }
+
+        // 顧客未選択時は従来通りマスターの標準売価・仕入値を更新する
+        if (!window.confirm(`【ご注意】現在、顧客が選択されていません。選択した${selectedIds.size}件の「マスター標準価格」自体を直接上書き更新します。よろしいですか？`)) return;
+
         const updates = items.filter(i => selectedIds.has(i.id)).map(item => {
             let updateData: Partial<MaterialItem> = {};
-            if (calcType === 'list_selling_rate') {
+            if (calcType === 'fixed') {
+                updateData.sellingPrice = rate;
+            } else if (calcType === 'list_selling_rate') {
                 if (item.listPrice > 0) updateData.sellingPrice = Math.round(item.listPrice * (rate / 100));
             } else if (calcType === 'list_cost_rate') {
                 if (item.listPrice > 0) updateData.costPrice = Math.round(item.listPrice * (rate / 100));
@@ -99,33 +175,9 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
         }
     };
 
-    const getAppliedPrice = (item: MaterialItem): number => {
-        const basePrice = item.sellingPrice || 0;
-        if (!activeCustomer) return basePrice;
-
-        const customerRules = pricingRules.filter(r => r.customerName === activeCustomer);
-        if (customerRules.length === 0) return basePrice;
-
-        const findBestRule = (scopeRules: PricingRule[]) => {
-            let r = scopeRules.find(r => r.category === item.category && r.model !== 'All' && (item.model || '').includes(r.model));
-            if (!r) r = scopeRules.find(r => r.category === item.category && r.model === 'All');
-            if (!r) r = scopeRules.find(r => r.category === 'All');
-            return r;
-        };
-
-        let appliedRule: PricingRule | undefined;
-        if (activeSite) appliedRule = findBestRule(customerRules.filter(r => r.siteName === activeSite));
-        if (!appliedRule) appliedRule = findBestRule(customerRules.filter(r => !r.siteName));
-
-        if (appliedRule) {
-            if (appliedRule.method === 'percent_of_list' && (item.listPrice || 0) > 0) {
-                return Math.round((item.listPrice || 0) * (appliedRule.value / 100));
-            } else if (appliedRule.method === 'markup_on_cost' && (item.costPrice || 0) > 0) {
-                return Math.round((item.costPrice || 0) * (1 + (appliedRule.value / 100)));
-            }
-        }
-
-        return basePrice;
+    const getPriceLabel = () => {
+        if (activeCustomer) return `${activeCustomer}${(activeSite && activeSite !== '') ? ` (${activeSite})` : ''} 適用単価`;
+        return "標準適用単価";
     };
 
     const SortIcon = ({ field, config }: { field: SortField, config: SortConfig }) => {
@@ -133,7 +185,7 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
         return config.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />;
     };
 
-    const isSearchActive = Object.values(filters).some(v => typeof v === 'string' && v.trim() !== '') || showRevisedOnly;
+    const isSearchActive = Object.values(filters).some(v => v !== '') || showRevisedOnly;
 
     const filteredItems = !isSearchActive ? [] : items.filter(item => {
         return (
@@ -142,7 +194,7 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
             (!filters.manufacturer || (item.manufacturer || '').toLowerCase().includes(filters.manufacturer.toLowerCase())) &&
             (!filters.model || `${item.model || ''} ${item.dimensions || ''} `.toLowerCase().includes(filters.model.toLowerCase())) &&
             (!filters.location || (item.location || '').toLowerCase().includes(filters.location.toLowerCase())) &&
-            (!showRevisedOnly || (item.previousListPrice && item.previousListPrice !== item.listPrice) || (item.previousCostPrice && item.previousCostPrice !== item.listPrice))
+            (!showRevisedOnly || (item.previousListPrice && item.previousListPrice !== item.listPrice) || (item.previousCostPrice && item.previousCostPrice !== item.costPrice))
         );
     });
 
@@ -160,6 +212,29 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
             bVal = (bSelling - bCost) / (bSelling || 1);
         }
 
+        const direction = sortConfig.direction === 'asc' ? 1 : -1;
+
+        // 型式や寸法のための自然順序付け (plumbing aware)
+        if (field === 'dimensions' || field === 'model' || field === 'name') {
+            const aParts = String(aVal).split(/(\d+)/);
+            const bParts = String(bVal).split(/(\d+)/);
+            
+            for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
+                const ap = aParts[i] || "";
+                const bp = bParts[i] || "";
+                if (ap === bp) continue;
+                
+                const an = parseInt(ap, 10);
+                const bn = parseInt(bp, 10);
+                
+                if (!isNaN(an) && !isNaN(bn)) {
+                    return (an - bn) * direction;
+                }
+                return ap.localeCompare(bp, undefined, { numeric: true, sensitivity: 'base' }) * direction;
+            }
+            return 0;
+        }
+
         if (sortConfig.direction === 'asc') {
             return aVal > bVal ? 1 : -1;
         } else {
@@ -170,11 +245,8 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
     const allVisibleIds = filteredItems.map(i => i.id);
     const isAllSelected = filteredItems.length > 0 && allVisibleIds.every(id => selectedIds.has(id));
 
-    const totalFilteredValue = filteredItems.reduce((s, i) => s + ((i.costPrice || 0) * (i.quantity || 0)), 0);
-
     return (
         <div className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-full">
-            {/* Table Controls */}
             <div className="p-2 sm:p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-4 flex-wrap">
                 <div className="hidden lg:flex items-center gap-2 bg-emerald-50 px-4 py-2.5 rounded-xl border border-emerald-200 shadow-sm animate-fade-in">
                     <Landmark size={14} className="text-emerald-600 shrink-0" />
@@ -190,9 +262,8 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
                 </button>
 
                 <div className="flex items-center gap-2 bg-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl border border-slate-200 shadow-sm min-w-0">
-                    <User size={12} className="text-slate-400 shrink-0 sm:hidden" />
-                    <User size={14} className="text-slate-400 shrink-0 hidden sm:block" />
-                    <span className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest mr-1 sm:mr-2 shrink-0">顧客:</span>
+                    <User size={14} className="text-slate-400 shrink-0" />
+                    <span className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest mr-2 shrink-0">顧客:</span>
                     <select
                         value={activeCustomer || ''}
                         onChange={(e) => onCustomerChange(e.target.value || null)}
@@ -205,41 +276,40 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
 
                 {activeCustomer && (
                     <div className="flex items-center gap-2 bg-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl border border-slate-200 shadow-sm min-w-0 animate-fade-in">
-                        <MapPin size={12} className="text-slate-400 shrink-0 sm:hidden" />
-                        <MapPin size={14} className="text-slate-400 shrink-0 hidden sm:block" />
-                        <select
+                        <MapPin size={14} className="text-slate-400 shrink-0" />
+                        <input
+                            type="text"
+                            list="active-site-list"
                             value={activeSite || ''}
                             onChange={(e) => onSiteChange(e.target.value || null)}
-                            className="bg-transparent border-none outline-none text-xs sm:text-sm font-bold text-slate-700 flex-grow truncate min-w-0"
-                        >
+                            placeholder="全現場共通 / 現場名入力"
+                            className="bg-transparent border-none outline-none text-xs sm:text-sm font-bold text-slate-700 flex-grow truncate min-w-0 placeholder:text-slate-300"
+                        />
+                        <datalist id="active-site-list">
                             <option value="">全現場共通</option>
                             {Array.from(new Set(pricingRules.filter(r => r.customerName === activeCustomer && r.siteName).map(r => r.siteName as string))).map(site => (
-                                <option key={site} value={site}>{site}</option>
+                                <option key={site} value={site} />
                             ))}
-                        </select>
+                        </datalist>
                     </div>
                 )}
 
                 {selectedIds.size > 0 && (
                     <div className="bg-slate-900 text-white px-3 sm:px-6 py-2 rounded-xl sm:rounded-2xl flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-4 shadow-lg animate-in slide-in-from-bottom-2 fade-in">
                         <span className="text-[10px] sm:text-xs font-black whitespace-nowrap text-center sm:text-left">{selectedIds.size}件選択中</span>
-                        <div className="hidden sm:block h-4 w-px bg-slate-700"></div>
-
                         <div className="flex items-center gap-1.5 sm:gap-2 justify-center">
                             <select value={calcType} onChange={e => setCalcType(e.target.value as any)} className="bg-slate-800 text-[10px] sm:text-xs border border-slate-700 rounded-lg px-1.5 sm:px-2 py-1 outline-none">
                                 <option value="list_selling_rate">定価の〇% (売値)</option>
                                 <option value="list_cost_rate">定価の〇% (仕入値)</option>
                                 <option value="cost_markup">仕入値+〇% (売値)</option>
                                 <option value="cost_rate">利益率〇% (売値)</option>
+                                <option value="fixed">指定単価 (¥)</option>
                             </select>
-                            <input type="number" value={calcRate} onChange={e => setCalcRate(e.target.value)} placeholder="%" className="w-12 sm:w-16 bg-slate-800 text-white text-[10px] sm:text-xs border border-slate-700 rounded-lg px-1.5 sm:px-2 py-1 outline-none text-center" disabled={isProcessing} />
+                            <input type="number" value={calcRate} onChange={e => setCalcRate(e.target.value)} placeholder={calcType === 'fixed' ? '¥' : '%'} className="w-12 sm:w-16 bg-slate-800 text-white text-[10px] sm:text-xs border border-slate-700 rounded-lg px-1.5 sm:px-2 py-1 outline-none text-center" disabled={isProcessing} />
                             <button onClick={handleBulkCalc} disabled={isProcessing} className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 px-2 sm:px-3 py-1 rounded-lg text-[10px] sm:text-xs font-black transition-colors whitespace-nowrap min-w-[50px] sm:min-w-[60px]">
-                                {isProcessing ? '更新中...' : '適用'}
+                                {isProcessing ? '更新中...' : (activeCustomer ? 'ルール保存' : '標準に適用')}
                             </button>
                         </div>
-
-                        <div className="hidden sm:block h-4 w-px bg-slate-700"></div>
-
                         <button
                             onClick={() => onPrint(items.filter(i => selectedIds.has(i.id)))}
                             className="flex items-center justify-center gap-1 sm:gap-2 text-blue-400 hover:text-blue-300 transition-colors text-[10px] sm:text-xs font-black whitespace-nowrap py-1.5 sm:py-0"
@@ -325,7 +395,7 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
                             </tr>
                         ) : (
                             sortedItems.map((item) => {
-                                const appliedPrice = getAppliedPrice(item);
+                                const appliedPrice = getAppliedPrice(item, activeCustomer, activeSite, pricingRules);
                                 const isSelected = selectedIds.has(item.id);
 
                                 return (
@@ -368,12 +438,41 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
                                         </td>
                                         <td className="p-2 sm:p-4 text-right">
                                             <div className="flex flex-col items-end gap-0.5 sm:gap-1">
-                                                <span className="text-[10px] sm:text-xs font-mono font-bold text-slate-600">
-                                                    {item.listPrice > 0 ? `定¥${Math.floor(item.listPrice).toLocaleString()}` : 'OPEN'}
-                                                </span>
+                                                {!activeCustomer ? (
+                                                    editingListPriceId === item.id ? (
+                                                        <input
+                                                            autoFocus
+                                                            type="number"
+                                                            value={tempListPrice}
+                                                            onChange={e => setTempListPrice(e.target.value)}
+                                                            onBlur={() => handleListPriceUpdate(item, tempListPrice)}
+                                                            onKeyDown={e => {
+                                                                if (e.key === 'Enter') handleListPriceUpdate(item, tempListPrice);
+                                                                if (e.key === 'Escape') setEditingListPriceId(null);
+                                                            }}
+                                                            className="w-20 text-right text-[10px] sm:text-xs font-mono font-bold text-slate-800 bg-amber-50 border-b border-amber-400 outline-none p-0.5 rounded-t"
+                                                        />
+                                                    ) : (
+                                                        <button 
+                                                            onClick={(e) => { e.stopPropagation(); setEditingListPriceId(item.id); setTempListPrice(item.listPrice.toString()); }}
+                                                            className="text-[10px] sm:text-xs font-mono font-bold text-slate-600 hover:text-slate-900 border-b border-dotted border-slate-300 transition-colors"
+                                                        >
+                                                            {item.listPrice > 0 ? `定¥${Math.floor(item.listPrice).toLocaleString()}` : 'OPEN/設定'}
+                                                        </button>
+                                                    )
+                                                ) : (
+                                                    <span className="text-[10px] sm:text-xs font-mono font-bold text-slate-600">
+                                                        {item.listPrice > 0 ? `定¥${Math.floor(item.listPrice).toLocaleString()}` : 'OPEN'}
+                                                    </span>
+                                                )}
                                                 {item.previousListPrice && item.previousListPrice !== item.listPrice && (
                                                     <span className="text-[9px] sm:text-[10px] font-mono font-bold text-slate-400 line-through decoration-slate-300">
                                                         定¥{Math.floor(item.previousListPrice).toLocaleString()}
+                                                    </span>
+                                                )}
+                                                {activeCustomer && (
+                                                    <span className="text-[9px] sm:text-[10px] font-mono font-bold text-slate-400">
+                                                        (標¥{(item.sellingPrice || 0).toLocaleString()})
                                                     </span>
                                                 )}
                                                 <span className="text-[9px] sm:text-[10px] font-mono font-bold text-slate-400">
@@ -388,7 +487,35 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
                                         </td>
                                         <td className="p-4 text-right">
                                             <div className="flex flex-col items-end">
-                                                <span className="text-base font-mono font-black text-blue-700">¥{(appliedPrice || 0).toLocaleString()}</span>
+                                                {activeCustomer ? (
+                                                    editingPriceId === item.id ? (
+                                                        <input
+                                                            autoFocus
+                                                            type="number"
+                                                            value={tempPrice}
+                                                            onChange={e => setTempPrice(e.target.value)}
+                                                            onBlur={() => handlePriceUpdate(item, tempPrice)}
+                                                            onKeyDown={e => {
+                                                                if (e.key === 'Enter') handlePriceUpdate(item, tempPrice);
+                                                                if (e.key === 'Escape') setEditingPriceId(null);
+                                                            }}
+                                                            className="w-24 text-right text-base font-mono font-black text-blue-700 bg-blue-50 border-b-2 border-blue-400 outline-none p-1 rounded-t animate-in fade-in zoom-in-95"
+                                                        />
+                                                    ) : (
+                                                        <button 
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setEditingPriceId(item.id); 
+                                                                setTempPrice((appliedPrice || 0).toString()); 
+                                                            }}
+                                                            className="text-base font-mono font-black text-blue-700 hover:bg-blue-100 hover:text-blue-800 px-2 py-1 rounded-lg border-b border-dashed border-blue-300 transition-all cursor-text group-hover:scale-105"
+                                                        >
+                                                            ¥{(appliedPrice || 0).toLocaleString()}
+                                                        </button>
+                                                    )
+                                                ) : (
+                                                    <span className="text-base font-mono font-black text-slate-700">¥{(appliedPrice || 0).toLocaleString()}</span>
+                                                )}
                                                 <div className="flex flex-col items-end -mt-0.5">
                                                     {item.listPrice > 0 && (
                                                         <span className="text-[9px] font-bold text-slate-400">

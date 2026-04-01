@@ -409,6 +409,11 @@ export const chatWithTakahashi = async (messages: any[], masterItems: Material[]
     - 資材登録: [[ACTION:REGISTER_ITEMS:[{"name":"品名","category":"分類","model":"型式","dimensions":"寸法","listPrice":定価,"costPrice":原価,"unit":"単位"}]]]
       ※新しい資材をマスターに登録する際に使用。
     - 情報更新: [[ACTION:UPDATE_INFO:{"customerName":"顧客名","siteName":"現場名"}]]
+      ※顧客（有レガロなど）を選択する際に使用。単価設定の「前」に必ずこのアクションを実行してください。
+    - 単価設定についてのガイドライン:
+      1. 顧客別の単価設定を頼まれた場合、安易に REGISTER_ITEMS や UPDATE_INFO で「定価・仕入値」を上書きしないでください。
+      2. ユーザーに「まず画面上部の【顧客】と【現場】を選択し、表で資材にチェックを入れてから、右上の【一括計算バルクバー】で【ルールとして保存】をクリックしてください」と案内してください。
+      3. マスター自体の標準単価を更新する場合のみ REGISTER_ITEMS を使用してください。
 
     【あなたの知識（取扱商品マスターリスト）】
     ※以下のJSONリスト内のidはシステム管理用です。ユーザーへの返信にはname, model, dimsなどを使用し、idは[ACTION]内でのみ使用してください。

@@ -135,3 +135,54 @@ export const filterAndSortItems = (items: MaterialItem[], query: string): Materi
         .sort((a, b) => b.score - a.score)
         .map(result => result.item);
 };
+
+/**
+ * 顧客・現場別の単価ルールを適用した価格を算出します
+ */
+export const getAppliedPrice = (item: MaterialItem, activeCustomer: string | null, activeSite: string | null, pricingRules: any[]): number => {
+    const basePrice = item.sellingPrice || 0;
+    if (!activeCustomer) return basePrice;
+
+    const customerRules = pricingRules.filter(r => r.customerName === activeCustomer);
+    if (customerRules.length === 0) return basePrice;
+
+    const findBestRule = (scopeRules: any[]) => {
+        // 1. 資材IDでの完全一致 (最優先)
+        let r = scopeRules.find(r => r.materialId === item.id);
+        if (r) return r;
+
+        // 2. カテゴリー + 型式での一致
+        if (item.model) {
+            r = scopeRules.find(r => r.category === item.category && r.model === item.model && !r.materialId);
+            if (r) return r;
+        }
+
+        // 3. カテゴリー全体での一致 (model: 'All')
+        r = scopeRules.find(r => r.category === item.category && r.model === 'All' && !r.materialId);
+        return r;
+    };
+
+    // 優先順位: 1. 現場別ルール 2. 顧客共通ルール
+    let rule: any;
+    if (activeSite && activeSite !== '') {
+        const siteRules = customerRules.filter(r => r.siteName === activeSite);
+        rule = findBestRule(siteRules);
+    }
+
+    if (!rule) {
+        const commonRules = customerRules.filter(r => !r.siteName || r.siteName === '');
+        rule = findBestRule(commonRules);
+    }
+
+    if (rule) {
+        if (rule.method === 'fixed_price') {
+            return rule.value;
+        } else if (rule.method === 'percent_of_list' && item.listPrice > 0) {
+            return Math.round(item.listPrice * (rule.value / 100));
+        } else if (rule.method === 'markup_on_cost' && item.costPrice > 0) {
+            return Math.round(item.costPrice * (1 + (rule.value / 100)));
+        }
+    }
+
+    return basePrice;
+};

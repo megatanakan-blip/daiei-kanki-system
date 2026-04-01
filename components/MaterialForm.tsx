@@ -300,13 +300,27 @@ export const MaterialForm: React.FC<MaterialFormProps> = ({ onSave, onClose, ini
                 <input type="number" name="listPrice" value={formData.listPrice} onChange={e => setFormData(p => ({ ...p, listPrice: e.target.value }))} placeholder="0 (オープン)" className="w-full px-4 py-3 bg-white border-2 border-slate-100 rounded-2xl font-mono font-bold text-slate-700 focus:border-blue-500 outline-none transition-all" />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">仕入値 <span className="text-red-500">*</span></label>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex justify-between items-center">
+                  <span>仕入値 <span className="text-red-500">*</span></span>
+                  {Number(formData.listPrice) > 0 && (
+                    <span className="text-[9px] font-mono text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                      掛: {(Number(formData.costPrice) / Number(formData.listPrice) * 100).toFixed(1)}%
+                    </span>
+                  )}
+                </label>
                 <div className="flex items-center gap-2">
                   <input type="number" name="costPrice" required value={formData.costPrice} onChange={e => setFormData(p => ({ ...p, costPrice: e.target.value }))} className="flex-1 px-4 py-3 bg-white border-2 border-slate-100 rounded-2xl font-mono font-bold focus:border-blue-500 outline-none transition-all" />
                 </div>
               </div>
               <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-blue-600 uppercase tracking-widest">標準売値 <span className="text-red-500">*</span></label>
+                <label className="text-[10px] font-black text-blue-600 uppercase tracking-widest flex justify-between items-center">
+                  <span>標準売値 <span className="text-red-500">*</span></span>
+                  {Number(formData.listPrice) > 0 && (
+                    <span className="text-[9px] font-mono text-blue-400 bg-blue-100/50 px-1.5 py-0.5 rounded border border-blue-200/50">
+                      掛: {(Number(formData.sellingPrice) / Number(formData.listPrice) * 100).toFixed(1)}%
+                    </span>
+                  )}
+                </label>
                 <div className="flex items-center gap-2">
                   <input type="number" name="sellingPrice" required value={formData.sellingPrice} onChange={e => setFormData(p => ({ ...p, sellingPrice: e.target.value }))} className="flex-1 px-4 py-3 border-2 border-blue-200 rounded-2xl font-mono font-bold text-blue-700 bg-blue-50 focus:border-blue-500 outline-none transition-all shadow-sm" />
                 </div>

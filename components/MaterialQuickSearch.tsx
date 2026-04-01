@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Search, X, Package, MapPin, TrendingUp, DollarSign, Layers, User, MapPinned } from 'lucide-react';
 import { MaterialItem, Customer, PricingRule } from '../types';
-import { normalizeForSearch, filterAndSortItems } from '../services/searchUtils';
+import { normalizeForSearch, filterAndSortItems, getAppliedPrice } from '../services/searchUtils';
 
 interface MaterialQuickSearchProps {
     items: MaterialItem[];
@@ -22,35 +22,6 @@ export const MaterialQuickSearch: React.FC<MaterialQuickSearchProps> = ({
 }) => {
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedItem, setSelectedItem] = useState<MaterialItem | null>(null);
-
-    // Apply customer pricing
-    const getAppliedPrice = (item: MaterialItem): number => {
-        if (!activeCustomer) return item.listPrice || 0;
-
-        const rule = pricingRules.find(r =>
-            r.customerName === activeCustomer &&
-            (!activeSite || r.siteName === activeSite) &&
-            r.materialId === item.id
-        );
-
-        if (rule?.customPrice !== undefined && rule.customPrice !== null) {
-            return rule.customPrice;
-        }
-
-        const categoryRule = pricingRules.find(r =>
-            r.customerName === activeCustomer &&
-            (!activeSite || r.siteName === activeSite) &&
-            r.category === item.category &&
-            !r.materialId
-        );
-
-        if (categoryRule) {
-            const base = categoryRule.basedOnListPrice ? (item.listPrice || 0) : (item.costPrice || 0);
-            return Math.floor(base * (categoryRule.ratePercent / 100));
-        }
-
-        return item.listPrice || 0;
-    };
 
     // Filter items based on search
     const filteredItems = useMemo(() => {
@@ -121,7 +92,7 @@ export const MaterialQuickSearch: React.FC<MaterialQuickSearchProps> = ({
                         </div>
                     ) : (
                         filteredItems.map((item) => {
-                            const appliedPrice = getAppliedPrice(item);
+                            const appliedPrice = getAppliedPrice(item, activeCustomer, activeSite, pricingRules);
                             const priceRate = item.listPrice > 0 ? (appliedPrice / item.listPrice) * 100 : 0;
 
                             return (
@@ -209,7 +180,7 @@ export const MaterialQuickSearch: React.FC<MaterialQuickSearchProps> = ({
                                 <div className="border-t pt-4">
                                     <div className="bg-indigo-50 rounded-2xl p-4">
                                         <div className="text-[10px] font-black text-indigo-600 uppercase tracking-widest mb-2">適用単価</div>
-                                        <div className="text-3xl font-black text-indigo-700 font-mono">¥{getAppliedPrice(selectedItem).toLocaleString()}</div>
+                                        <div className="text-3xl font-black text-indigo-700 font-mono">¥{getAppliedPrice(selectedItem, activeCustomer, activeSite, pricingRules).toLocaleString()}</div>
                                         {activeCustomer && (
                                             <div className="text-xs text-indigo-600 font-bold mt-1">※ {activeCustomer} 様向け単価</div>
                                         )}
