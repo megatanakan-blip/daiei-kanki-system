@@ -408,6 +408,7 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                                         <div>{item?.name || ''}</div>
                                         {item?.manufacturer && <div className="text-[8px] text-slate-500 font-normal leading-tight">{item.manufacturer}</div>}
                                         {item?.sourceSlipNo && <div className="text-[7px] text-slate-400 font-mono leading-none mt-0.5">伝票: {item.sourceSlipNo}</div>}
+                                        {item?.slipItemNote && <div className="text-[7px] text-amber-600 font-bold opacity-70 leading-none mt-1 print:hidden">※{item.slipItemNote}</div>}
                                     </td>
                                     <td className="px-2 border-r truncate">{item ? `${item.model} ${item.dimensions}` : ''}</td>
 
@@ -562,6 +563,7 @@ const CartItemRow = React.memo(({
     onDelete: (index: number) => void
 }) => {
     const isReturn = activeMode === 'return';
+    const [isNoteOpen, setIsNoteOpen] = useState(!!item.slipItemNote);
     const historyInfo = (item as any).historyMonth ? {
         month: (item as any).historyMonth,
         available: (item as any).availableQuantity
@@ -627,7 +629,31 @@ const CartItemRow = React.memo(({
                                 ) : (
                                     <span className="px-1.5 py-0.5 bg-slate-100 text-[8px] font-black text-slate-400 rounded border border-slate-200">通常入力</span>
                                 )}
+                                {item.slipItemNote && (
+                                    <span className="px-1.5 py-0.5 bg-amber-100 text-[8px] font-black text-amber-600 rounded border border-amber-200 flex items-center gap-1">
+                                        <MessageSquare size={10} /> メモあり
+                                    </span>
+                                )}
                             </div>
+                            {isNoteOpen && (
+                                <div className="mt-2 animate-in slide-in-from-top-1 duration-200">
+                                    <div className="relative group/note">
+                                        <MessageSquare size={14} className="absolute left-3 top-3 text-amber-400" />
+                                        <textarea
+                                            value={item.slipItemNote || ''}
+                                            onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, slipItemNote: e.target.value } : pi))}
+                                            placeholder="単価調整の理由など（例：傷あり特価、旧材処分など）"
+                                            className="w-full pl-9 pr-4 py-2 bg-amber-50/50 border border-amber-100 rounded-xl text-[11px] font-bold text-amber-900 outline-none focus:ring-2 focus:ring-amber-200 transition-all min-h-[60px] placeholder:text-amber-300"
+                                        />
+                                        <button 
+                                            onClick={() => setIsNoteOpen(false)} 
+                                            className="absolute right-2 top-2 p-1 text-amber-400 hover:text-amber-600 opacity-0 group-hover/note:opacity-100 transition-opacity"
+                                        >
+                                            <X size={12} />
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </td>
                     <td className="text-center">
@@ -649,12 +675,21 @@ const CartItemRow = React.memo(({
                         </div>
                     </td>
                     <td className="text-center">
-                        <input
-                            type="number"
-                            value={item.appliedPrice || 0}
-                            onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, appliedPrice: parseInt(e.target.value) || 0 } : pi))}
-                            className="w-full py-2 border rounded-xl text-center font-black bg-slate-50 outline-none text-emerald-600"
-                        />
+                        <div className="flex flex-col items-center gap-1">
+                            <input
+                                type="number"
+                                value={item.appliedPrice || 0}
+                                onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, appliedPrice: parseInt(e.target.value) || 0 } : pi))}
+                                className="w-full py-2 border rounded-xl text-center font-black bg-slate-50 outline-none text-emerald-600"
+                            />
+                            <button 
+                                onClick={() => setIsNoteOpen(!isNoteOpen)}
+                                className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[9px] font-black transition-all ${isNoteOpen ? 'bg-amber-100 text-amber-600' : 'text-slate-300 hover:text-amber-400 hover:bg-amber-50'}`}
+                            >
+                                <MessageSquare size={12} />
+                                {isNoteOpen ? 'メモを閉じる' : 'メモを追加'}
+                            </button>
+                        </div>
                     </td>
                     <td className="text-right">
                         <button onClick={() => onDelete(index)} className="p-2 text-rose-300 hover:text-rose-500">
@@ -1257,6 +1292,7 @@ export const SlipManager: React.FC<{
     const customerHierarchy = useMemo(() => {
         const map = new Map<string, Map<string, Slip[]>>();
         const keywords = historySearchQuery.toLowerCase().trim().split(/[\s\u3000]+/).filter(k => k.length > 0);
+        const [y, m] = targetMonth.split('-').map(Number);
 
         // Filter logic: Check customer/site name OR item details
         const matches = (s: Slip) => {
@@ -1274,14 +1310,31 @@ export const SlipManager: React.FC<{
         };
 
         archivedSlips.filter(s => matches(s)).forEach(s => {
-            if (!map.has(s.customerName)) map.set(s.customerName, new Map());
-            const siteMap = map.get(s.customerName)!;
-            const currentSiteKey = s.constructionName || '一般・共通';
-            if (!siteMap.has(currentSiteKey)) siteMap.set(currentSiteKey, []);
-            siteMap.get(currentSiteKey)!.push(s);
+            const customer = customers.find(c => c.name === s.customerName);
+            const closingDay = customer?.closingDay || 99;
+            
+            let start: string, end: string;
+            if (closingDay === 99) {
+                start = `${y}-${String(m).padStart(2, '0')}-01`;
+                end = `${y}-${String(m).padStart(2, '0')}-31`;
+            } else {
+                const [py, pm] = m === 1 ? [y - 1, 12] : [y, m - 1];
+                const pLastDay = new Date(py, pm, 0).getDate();
+                const startDay = Math.min(closingDay + 1, pLastDay);
+                start = `${py}-${String(pm).padStart(2, '0')}-${String(startDay).padStart(2, '0')}`;
+                end = `${y}-${String(m).padStart(2, '0')}-${String(closingDay).padStart(2, '0')}`;
+            }
+
+            if (s.date >= start && s.date <= end) {
+                if (!map.has(s.customerName)) map.set(s.customerName, new Map());
+                const siteMap = map.get(s.customerName)!;
+                const currentSiteKey = s.constructionName || '一般・共通';
+                if (!siteMap.has(currentSiteKey)) siteMap.set(currentSiteKey, []);
+                siteMap.get(currentSiteKey)!.push(s);
+            }
         });
         return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-    }, [archivedSlips, historySearchQuery]);
+    }, [archivedSlips, historySearchQuery, targetMonth, customers]);
 
     const tabs = initialTab === 'history'
         ? [{ id: 'history', label: '納品・請求履歴', icon: History }]
@@ -1810,17 +1863,18 @@ export const SlipManager: React.FC<{
                 .no-spin-buttons {
                     -moz-appearance: textfield;
                 }
-                @media print {
-                    @page { size: A4; margin: 0; }
-                    body { -webkit-print-color-adjust: exact; }
-                    #print-target {
-                        transform: none !important;
-                        width: 100% !important;
-                        margin: 0 !important;
-                        padding: 0 !important;
-                    }
-                }
-            `}</style>
+                         @media print {
+                            @page { size: A4; margin: 0; }
+                            body { -webkit-print-color-adjust: exact; }
+                            .print-hidden, .print\\:hidden { display: none !important; }
+                            #print-target {
+                                transform: none !important;
+                                width: 100% !important;
+                                margin: 0 !important;
+                                padding: 0 !important;
+                            }
+                        }
+                    `}</style>
         </div >
     );
 };

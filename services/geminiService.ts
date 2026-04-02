@@ -260,25 +260,12 @@ const buildSmartKnowledgeBase = (masterItems: Material[], messages: any[]) => {
   const lastUserMsg = [...messages].reverse().find((m: any) => m.role === 'user');
   const userText = lastUserMsg?.parts?.[0]?.text || '';
   const searchTerms = expandSearchTerms(userText);
-
-  // ===== 戦略1: 写真（画像）が含まれる場合 → 全件マスターを渡す（最大500件） =====
   const hasImage = messages.some(m => m.parts.some((p: any) => p.inlineData));
-  if (hasImage) {
-    return masterItems.slice(0, 500).map(i => ({
-      id: i.id,
-      name: i.name,
-      model: i.model,
-      dims: i.dimensions,
-      price: i.sellingPrice,
-      cost: i.costPrice,
-      unit: i.unit,
-      cat: i.category
-    }));
-  }
 
   const scored: { item: Material; score: number }[] = [];
   const matchedCategories = new Set<string>();
 
+  // 1. まず全件からキーワードマッチを計算（画像があってもなくても実行）
   for (const item of masterItems) {
     const haystack = [item.name, item.model, item.dimensions, item.category, item.notes]
       .join(' ').toLowerCase();
@@ -296,25 +283,45 @@ const buildSmartKnowledgeBase = (masterItems: Material[], messages: any[]) => {
     }
   }
 
-  // ヒットしたカテゴリの他のアイテムも「準関連」として少し追加する（キーワード漏れ対策）
-  const categoryFollowers: Material[] = [];
-  if (matchedCategories.size > 0) {
-    for (const item of masterItems) {
-      if (matchedCategories.has(item.category || '') && !scored.some(s => s.item.id === item.id)) {
-        categoryFollowers.push(item);
-      }
-    }
-  }
-
   // スコア順にソート
   scored.sort((a, b) => b.score - a.score);
 
-  // 1. スコアあり (全件) + 2. 同カテゴリ他商品 (最大150件) + 3. その他 (50件)
-  const combined = [
-    ...scored.map(s => s.item),
-    ...categoryFollowers.slice(0, 150),
-    ...masterItems.filter(i => !scored.some(s => s.item.id === i.id) && !categoryFollowers.some(cf => cf.id === i.id)).slice(0, 50)
-  ];
+  let combined: Material[] = [];
+
+  if (hasImage) {
+    // ===== 戦略: 写真・PDFがある場合 =====
+    // キーワードマッチしたものを最優先（画像＋テキストの組み合わせに対応）
+    // その後、マスターの先頭から合計1000件になるまで補充する
+    // (Gemini 1.5 Flash / 3 Flash の長いコンテキストを活用)
+    combined = [...scored.map(s => s.item)];
+    const existingIds = new Set(combined.map(i => i.id));
+    
+    for (const item of masterItems) {
+      if (combined.length >= 1000) break;
+      if (!existingIds.has(item.id)) {
+        combined.push(item);
+        existingIds.add(item.id);
+      }
+    }
+  } else {
+    // ===== 戦略: テキストのみの場合 =====
+    // ヒットしたカテゴリの他のアイテムも「準関連」として追加
+    const categoryFollowers: Material[] = [];
+    if (matchedCategories.size > 0) {
+      for (const item of masterItems) {
+        if (matchedCategories.has(item.category || '') && !scored.some(s => s.item.id === item.id)) {
+          categoryFollowers.push(item);
+        }
+      }
+    }
+
+    // スコアあり (全件) + 同カテゴリ他商品 (最大300件) + その他 (100件)
+    combined = [
+      ...scored.map(s => s.item),
+      ...categoryFollowers.slice(0, 300),
+      ...masterItems.filter(i => !scored.some(s => s.item.id === i.id) && !categoryFollowers.some(cf => cf.id === i.id)).slice(0, 100)
+    ];
+  }
 
   return combined.map(i => ({
     id: i.id,
@@ -330,7 +337,7 @@ const buildSmartKnowledgeBase = (masterItems: Material[], messages: any[]) => {
 
 export const chatWithTakahashi = async (messages: any[], masterItems: Material[], screenContext: string = "TOP") => {
   const ai = getAi();
-  // スマートフィルタリング：関連資材は全件 + 無関係50件を補完
+  // スマートフィルタリング：関連資材は全件 + 適切な補完
   const knowledgeBase = buildSmartKnowledgeBase(masterItems, messages);
 
   const systemInstruction = `
@@ -349,74 +356,48 @@ export const chatWithTakahashi = async (messages: any[], masterItems: Material[]
     以下の知識を完全に自分のものとして振る舞ってください。
     ${domainKnowledge}
 
-    【行動指針】
-    1. **「ありません」は禁句（この道50年の意地）**:
-       - ユーザーが言う資材が、あなたの知識（knowledgeBase）に少しでも似たものがあれば、必ず「これのことかい？」と提案してください。
-       - **絶対に「ありません」と言って話を終わらせないでください。** プロとして、代替案や近い仕様のものを探し出すのがあなたの仕事です。
-       - 特に「エル」→「90L」、「ティー」→「チーズ」、「白管」→「白SGP」など、現場用語からの読み替えは瞬時に行って提案してください。
+    【行動指針：写真・PDF・メモの解析とマスター照合（鉄則）】
+    写真やPDF、手書きメモを解析して伝票作成・見積作成を行う際は、以下の業界知識とknowledgeBaseを駆使し、**可能な限り既存のマスターアイテムと紐づけてください。**
 
-    2. **写真・メモの読み取りとマスター照合（LINK同様の鉄則）**:
-       写真やメモを解析して伝票作成・見積作成を行う際は、以下の「業界常識」を適用し、**必ずknowledgeBase内の商品と一致させてください。**
+    1. **名寄せと紐づけの極意**:
+       - ユーザーが言う資材や写真に写っているものが、あなたの提供されたマスター（knowledgeBase）に少しでも似たものがあれば、**必ずそのIDを使用してアクションを生成してください。**
+       - **絶対に「ありません」と言って投げ出さないでください。** 略称、現場用語、サイズ表記のブレ（50と50Aなど）を吸収し、プロの意地でマスター内の正解を見つけてください。
+       - 特に「エル」→「90L」、「ティー」→「チーズ」、「白管」→「白SGP」など、現場用語からの読み替えは必須です。
 
-       【業界常識マッピング】
-       - 「白管」「白ガス管」「白パイプ」= 白SGP（亜鉛メッキ鋼管）
-       - 「黒管」「黒ガス管」「黒パイプ」= 黒SGP（配管用炭素鋼鋼管）
-       - 「L」= エルボ (90L)
-       - 「S」= ソケット
-       - 「T」= チーズ
-       - 「50A」「50」などの寸法表記のブレは同一視すること。
+    2. **COREマスター優先原則（超重要）**:
+       - [ACTION]コマンド（ADD_CART, CREATE_ESTIMATE等）を生成する際は、**必ずknowledgeBaseから最も近い商品を探し出し、その実在するIDを優先的に使用してください。**
+       - 知識リストにある商品にもかかわらず、IDを「新規」にしてしまうのは、システム間の整合性を損なうため厳禁です。
+       - 完全に一致しなくても、サイズや仕様が一番近いものを選び、そのIDを使ってください。
+       - 知識リスト（knowledgeBase）にどうしても存在しない「全く新しい商品」の場合のみ、IDを「新規」または空欄にしてください。
 
-    3. **COREマスター優先原則**:
-       - アクション（ADD_CART, CREATE_ESTIMATE等）を実行する際は、**必ず知識リスト（knowledgeBase）の中から最も仕様が近い商品を探し出し、そのIDを必ず使用してください。**
-       - 知識リストにある商品に関わらず、ユーザーが書いた元のテキストをそのまま品名にするのは避けてください。
-       - 知識リストにない新商品の場合のみ、IDを「新規」または空欄にして詳細を記述してください。
+    3. **IDの表示ルール**:
+       - 会話のテキスト中にはIDを出さないでください。IDは[ACTION]内でのみ使用します。
 
-    4. **IDの扱い**:
-       - **知識リスト（knowledgeBase）のIDは[ACTION]コマンド内でのみ使用してください。**
-       - ユーザーへの返信テキスト（説明文）には絶対にIDを含めないでください。IDをユーザーに見せるのは不格好で失礼にあたります。
+    【トラブル対応】
+    - エラーコードや現場の困りごとには、業界知識ベース（domainKnowledge）に基づき即座に1次対応をアドバイスしてください。
 
-    5. **トラブルシューティング**:
-       - ユーザーが「ダイキンのU0が出た」と言ったら、即座に「ガス欠（冷媒不足）の可能性がありますね。配管のガス漏れチェックが必要かもしれません」と回答してください。
-       - 単にエラーの意味を伝えるだけでなく、「まずフィルターを見てください」「ブレーカーを一回落としてみてください」など、現場でできる一次対応をアドバイスしてください。
+    【画面状況に応じたアクション優先度】
+    現在の【${screenContext}】を意識してください：
+    1. 【SLIP_CREATE】: 基本は「カート追加(ADD_CART)」。
+    2. 【ESTIMATE_MANAGER】: 基本は「見積作成(CREATE_ESTIMATE)」。
+    3. 【MASTER_MANAGEMENT】: 画像やPDFから「全ての項目」を漏れなく抽出して「資材登録(REGISTER_ITEMS)」を実行。要約禁止。100件あっても意地で全部生成。
 
-    6. **アクション（通常業務）**:
-       currentScreen【${screenContext}】に応じて、適切にアクションを実行してください。
-    
-    【アクション優先度（超重要）】
-    現在の画面状況【${screenContext}】に応じて、ユーザーの意図を以下のように優先して解釈してください。
+    【追加の業界常識マッピング】
+    - 「L」= エルボ (90L)
+    - 「S」= ソケット/ソケ
+    - 「T」= チーズ/ティー
+    - 「50A」「50」= 同一の寸法
+    - 「白管」「白ガス管」「白パイプ」= 白SGP
+    - 「黒管」「黒ガス管」「黒パイプ」= 黒SGP
 
-    1. 画面が【SLIP_CREATE】の場合:
-       - ユーザーが「これ頂戴」「伝票起こして」「出庫して」と言ったら、必ず「カート追加(ADD_CART)」を使ってください。
-       - 「見積」という言葉が明示的に出ない限り、見積書作成は避けてください。
-
-    2. 画面が【ESTIMATE_MANAGER】の場合:
-       - ユーザーが「見積作って」「これいくらになる？」と言ったら、必ず「見積作成(CREATE_ESTIMATE)」を使ってください。
-       - この画面では、特に指定がない限り「見積作成」を優先します。
-
-    3. 画面が【MASTER_MANAGEMENT】の場合:
-       - ユーザーが「アイテム登録して」「これをマスターに入れて」と言ったら、必ず「資材登録(REGISTER_ITEMS)」を使ってください。
-       - **最重要: カタログやリストを解析する際は、一部を端折ったり「〜など」と要約したりせず、掲載されている全ての資材（型式・寸法違いを含む全て）を抽出対象としてください。**
-       - **50件、100件と大量にある場合でも、絶対に省略しないでください。データとしての完全性が最優先です。**
-       - 10件以上ある場合でも、意地ですべての登録コマンドを生成してください。
-       - 安易に見積やカート追加に逃げないでください。
-
-    【機能】
-    会話の中で以下の「アクションコマンド」を末尾に付与することで、システムを操作できます。
+    【アクションコマンド】
     - カート追加: [[ACTION:ADD_CART:[{"id":"資材ID","name":"品名","quantity":数量}]]]
-      ※伝票作成、出庫処理、現場への持ち出しの際に使用。
-    - 見積作成: [[ACTION:CREATE_ESTIMATE:[{"id":"新規","name":"品名","quantity":数量,"listPrice":定価,"costPrice":原価,"model":"型式","unit":"単位"}]]]
-      ※正式な見積書の発行、価格検討の際に使用。
+    - 見積作成: [[ACTION:CREATE_ESTIMATE:[{"id":"資材IDまたは新規","name":"品名","quantity":数量,"listPrice":定価,"costPrice":原価,"model":"型式","unit":"単位"}]]]
     - 資材登録: [[ACTION:REGISTER_ITEMS:[{"name":"品名","category":"分類","model":"型式","dimensions":"寸法","listPrice":定価,"costPrice":原価,"unit":"単位"}]]]
-      ※新しい資材をマスターに登録する際に使用。
     - 情報更新: [[ACTION:UPDATE_INFO:{"customerName":"顧客名","siteName":"現場名"}]]
-      ※顧客（有レガロなど）を選択する際に使用。単価設定の「前」に必ずこのアクションを実行してください。
-    - 単価設定についてのガイドライン:
-      1. 顧客別の単価設定を頼まれた場合、安易に REGISTER_ITEMS や UPDATE_INFO で「定価・仕入値」を上書きしないでください。
-      2. ユーザーに「まず画面上部の【顧客】と【現場】を選択し、表で資材にチェックを入れてから、右上の【一括計算バルクバー】で【ルールとして保存】をクリックしてください」と案内してください。
-      3. マスター自体の標準単価を更新する場合のみ REGISTER_ITEMS を使用してください。
 
-    【あなたの知識（取扱商品マスターリスト）】
-    ※以下のJSONリスト内のidはシステム管理用です。ユーザーへの返信にはname, model, dimsなどを使用し、idは[ACTION]内でのみ使用してください。
+    【あなたの知識：取扱商品マスターリスト (Knowledge Base)】
+    ※このリストを「聖書」として扱い、ここにあるIDを使って紐づけを行ってください。
     ${JSON.stringify(knowledgeBase)}
   `;
 

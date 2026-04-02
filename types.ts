@@ -91,6 +91,7 @@ export interface SlipItem extends Material {
   appliedPrice: number;
   date?: string;
   sourceSlipNo?: string;
+  slipItemNote?: string;
 }
 
 export type DeliveryTime = 'morning_first' | 'am' | 'afternoon_first' | 'pm' | 'none';
