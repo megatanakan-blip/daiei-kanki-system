@@ -282,12 +282,33 @@ export const AITakahashi: React.FC<AITakahashiProps> = ({ masterItems, onAddToCa
                       <div className="p-2 sm:p-3">
                         {action.type === 'ADD_CART' || action.type === 'CREATE_ESTIMATE' ? (
                           <div className="space-y-1 mb-2 sm:mb-3">
-                            {(Array.isArray(action.payload) ? action.payload : [action.payload]).map((item: any, i: number) => (
-                              <div key={i} className="flex justify-between items-center text-[9px] sm:text-[10px] font-mono bg-slate-50/50 p-1 rounded">
-                                <span className="truncate flex-1">・{item.name}</span>
-                                <span className="font-black ml-2">{item.quantity}個</span>
-                              </div>
-                            ))}
+                            {(Array.isArray(action.payload) ? action.payload : [action.payload]).map((item: any, i: number) => {
+                              const isNew = item.id === '新規' || !item.id || item.id.startsWith('ai-');
+                              return (
+                                <div key={i} className="flex flex-col gap-0.5 bg-slate-50/50 p-1.5 rounded mb-1 last:mb-0">
+                                  <div className="flex justify-between items-start gap-2">
+                                    <span className="text-[9px] sm:text-[10px] font-mono font-bold leading-tight flex-1">
+                                      ・{item.name} {item.dimensions && <span className="opacity-60">[{item.dimensions}]</span>}
+                                    </span>
+                                    <span className="text-[9px] sm:text-[10px] font-mono font-black whitespace-nowrap text-slate-500">
+                                      {item.quantity} {item.unit || '個'}
+                                    </span>
+                                  </div>
+                                  {isNew && (
+                                    <div className="flex items-center gap-1">
+                                      <span className="px-1 py-0.5 bg-amber-100 text-amber-700 text-[8px] font-black rounded uppercase tracking-tighter">マスター未登録 (新規)</span>
+                                      <span className="text-[8px] text-amber-500 font-bold">※同名資材があればマスター修正が必要です</span>
+                                    </div>
+                                  )}
+                                  {!isNew && (
+                                    <div className="flex items-center gap-1">
+                                      <span className="px-1 py-0.5 bg-blue-100 text-blue-700 text-[8px] font-black rounded uppercase tracking-tighter">マスター紐付け済み</span>
+                                      <span className="text-[8px] text-blue-400 font-bold opacity-60">ID: {item.id}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         ) : action.type === 'REGISTER_ITEMS' ? (
                           <div className="space-y-1 mb-2 sm:mb-3">

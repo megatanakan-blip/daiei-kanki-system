@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { Slip, SlipItem, SlipType, DeliveryTime, DeliveryDestination, MaterialItem, PricingRule, Customer } from '../types';
-import { X, Trash2, Printer, FileText, ShoppingCart, Save, HardHat, Loader2, Edit3, FileOutput, CheckSquare, Square, Search, MapPin, Clock, Users, Info, RotateCcw, AlertTriangle, ArrowRight, Package, Layers, Check, Calculator, History, Archive, FileStack, ChevronDown, ChevronRight, Building2, Eye, EyeOff, Calendar, User, UserCheck, Camera, Sparkles, Plus, Minus, MessageSquare, Edit2, LayoutGrid, FileSearch, Database, Mail, GripVertical } from 'lucide-react';
+import { X, Trash2, Printer, FileText, ShoppingCart, Save, HardHat, Loader2, Edit3, FileOutput, CheckSquare, Square, Search, MapPin, Clock, Users, Info, RotateCcw, AlertTriangle, ArrowRight, Package, Layers, Check, PlusCircle, Calculator, History, Archive, FileStack, ChevronDown, ChevronRight, Building2, Eye, EyeOff, Calendar, User, UserCheck, Camera, Sparkles, Plus, Minus, MessageSquare, Edit2, LayoutGrid, FileSearch, Database, Mail, GripVertical } from 'lucide-react';
 import * as storage from '../services/firebaseService';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
 import { normalizeForSearch, filterAndSortItems } from '../services/searchUtils';
@@ -811,6 +811,7 @@ export const SlipManager: React.FC<{
     const [isSaving, setIsSaving] = useState(false);
     const [isAnalyzingReturn, setIsAnalyzingReturn] = useState(false);
     const [returnAmbiguityResults, setReturnAmbiguityResults] = useState<any[]>([]);
+    const [selectedSuggestions, setSelectedSuggestions] = useState<Map<string, any>>(new Map());
     const [showReturnResolutionModal, setShowReturnResolutionModal] = useState(false);
 
     useEffect(() => {
@@ -939,12 +940,36 @@ export const SlipManager: React.FC<{
     }, [itemSearchQuery, masterItems, activeMode, siteHistoryItems]);
 
     const handleAddFromMaster = (item: any) => {
-        if (activeMode === 'return') {
-            onUpdateCart(prev => [...prev, { ...item, quantity: -1, deliveredQuantity: 0 }]);
-        } else {
-            onUpdateCart(prev => [...prev, { ...item, quantity: 1, appliedPrice: item.sellingPrice || item.appliedPrice, deliveredQuantity: 1 }]);
-        }
+        const itemToAdd = activeMode === 'return' 
+            ? { ...item, quantity: -1, deliveredQuantity: 0 }
+            : { ...item, quantity: 1, appliedPrice: item.sellingPrice || item.appliedPrice, deliveredQuantity: 1 };
+        
+        onUpdateCart(prev => [...prev, itemToAdd]);
         setItemSearchQuery(''); setShowItemSuggestions(false);
+        setSelectedSuggestions(new Map());
+    };
+
+    const handleToggleSuggestion = (item: any) => {
+        const key = item.id + (item.historyMonth || '');
+        const next = new Map(selectedSuggestions);
+        if (next.has(key)) {
+            next.delete(key);
+        } else {
+            next.set(key, item);
+        }
+        setSelectedSuggestions(next);
+    };
+
+    const handleBulkAdd = () => {
+        if (selectedSuggestions.size === 0) return;
+        const itemsToAdd = Array.from(selectedSuggestions.values()).map((item: any) => {
+            return activeMode === 'return'
+                ? { ...item, quantity: -1, deliveredQuantity: 0 }
+                : { ...item, quantity: 1, appliedPrice: item.sellingPrice || item.appliedPrice, deliveredQuantity: 1 };
+        });
+        onUpdateCart(prev => [...prev, ...itemsToAdd]);
+        setItemSearchQuery(''); setShowItemSuggestions(false);
+        setSelectedSuggestions(new Map());
     };
 
     const handleManualAdd = useCallback(() => {
@@ -1613,20 +1638,66 @@ export const SlipManager: React.FC<{
                                                         className={`w-full pl-12 pr-4 py-4 bg-slate-50 border-2 ${activeMode === 'return' ? 'border-rose-100 focus:border-rose-500' : 'border-slate-100 focus:border-blue-500'} rounded-2xl font-bold transition-all outline-none shadow-inner text-sm`} 
                                                     />
                                                     {showItemSuggestions && itemSuggestions.length > 0 && (
-                                                        <div className="absolute top-full left-0 right-0 bg-white border shadow-2xl z-[100] rounded-[1.5rem] mt-2 max-h-64 overflow-y-auto">
-                                                            {itemSuggestions.map((i: any) => (
-                                                                <div key={i.id + (i.historyMonth || '')} onClick={() => handleAddFromMaster(i)} className="p-4 hover:bg-blue-50 cursor-pointer border-b last:border-0 flex justify-between items-center font-bold text-sm">
-                                                                    <div className="flex flex-col">
-                                                                        <span>{i.name}</span>
-                                                                        <span className="text-[10px] text-slate-400 font-mono">{i.model} {i.dimensions}</span>
-                                                                    </div>
-                                                                    <div className="flex items-center gap-4">
-                                                                        {i.historyMonth && <span className="text-[9px] bg-rose-50 text-rose-600 px-2 py-1 rounded font-black">{i.historyMonth} 納品</span>}
-                                                                        <span className="text-[11px] font-black text-emerald-600">¥{(i.appliedPrice || 0).toLocaleString()}</span>
-                                                                        {i.availableQuantity !== undefined && <span className="text-[9px] bg-slate-100 px-2 py-1 rounded">残:{i.availableQuantity}</span>}
-                                                                    </div>
-                                                                </div>
-                                                            ))}
+                                                        <div className="absolute top-full left-0 right-0 bg-white border border-slate-200 shadow-[0_20px_50px_rgba(0,0,0,0.2)] z-[100] rounded-[1.5rem] mt-2 flex flex-col overflow-hidden max-h-[440px]">
+                                                            <div className="bg-slate-50 px-4 py-2 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b flex justify-between items-center">
+                                                                <span>検索結果 ({itemSuggestions.length}件)</span>
+                                                                {selectedSuggestions.size > 0 && <span className="text-blue-600">{selectedSuggestions.size}件 選択中</span>}
+                                                            </div>
+                                                            <div className="flex-grow overflow-y-auto divide-y divide-slate-100">
+                                                                {itemSuggestions.map((i: any) => {
+                                                                    const key = i.id + (i.historyMonth || '');
+                                                                    const isSelected = selectedSuggestions.has(key);
+                                                                    return (
+                                                                        <div 
+                                                                            key={key} 
+                                                                            className={`group p-4 hover:bg-slate-50 cursor-pointer flex items-center gap-3 transition-colors ${isSelected ? 'bg-blue-50/50' : ''}`}
+                                                                        >
+                                                                            <div 
+                                                                                onClick={(e) => { e.stopPropagation(); handleToggleSuggestion(i); }} 
+                                                                                className={`w-6 h-6 rounded-md border-2 flex items-center justify-center transition-all ${isSelected ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'border-slate-200 group-hover:border-blue-400 bg-white'}`}
+                                                                            >
+                                                                                {isSelected ? <Check size={16} strokeWidth={4} /> : <div className="w-1.5 h-1.5 bg-slate-200 rounded-full group-hover:bg-blue-300"></div>}
+                                                                            </div>
+                                                                            <div 
+                                                                                onClick={() => handleAddFromMaster(i)} 
+                                                                                className="flex-grow min-w-0"
+                                                                            >
+                                                                                <div className="flex justify-between items-center mb-0.5">
+                                                                                    <span className="font-extrabold text-sm truncate group-hover:text-blue-700 transition-colors">{i.name}</span>
+                                                                                    <div className="flex items-center gap-2 shrink-0">
+                                                                                        {i.historyMonth && <span className="text-[9px] bg-rose-50 text-rose-600 px-2 py-0.5 rounded font-black">{i.historyMonth} 納品</span>}
+                                                                                        <span className="text-sm font-black text-blue-700">¥{(i.appliedPrice || 0).toLocaleString()}</span>
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div className="flex justify-between items-center">
+                                                                                    <span className="text-[10px] text-slate-400 font-mono truncate">{i.model} {i.dimensions}</span>
+                                                                                    <span className="text-[9px] font-bold text-slate-300 group-hover:text-blue-400 transition-colors">クリックで即時追加</span>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                            <div className="p-4 bg-slate-50 border-t flex gap-3">
+                                                                <button 
+                                                                    onClick={() => { setItemSearchQuery(''); setShowItemSuggestions(false); setSelectedSuggestions(new Map()); }} 
+                                                                    className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 hover:bg-slate-200 rounded-xl transition-all"
+                                                                >
+                                                                    キャンセル
+                                                                </button>
+                                                                <div className="flex-grow"></div>
+                                                                {selectedSuggestions.size > 0 ? (
+                                                                    <button 
+                                                                        onClick={handleBulkAdd} 
+                                                                        className="flex-grow py-3 bg-blue-600 text-white rounded-xl text-xs font-black shadow-lg shadow-blue-200 hover:bg-blue-700 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                                                                    >
+                                                                        <PlusCircle size={14} />
+                                                                        選択した {selectedSuggestions.size} 件をカートに追加
+                                                                    </button>
+                                                                ) : (
+                                                                    <p className="text-[10px] text-slate-400 font-bold self-center italic">アイテムをクリックして選択</p>
+                                                                )}
+                                                            </div>
                                                         </div>
                                                     )}
                                                 </div>

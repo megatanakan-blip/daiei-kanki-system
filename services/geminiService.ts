@@ -237,16 +237,14 @@ const INDUSTRY_SYNONYMS: Record<string, string[]> = {
   'バンド': ['バンド', 'ハンガー', '吹り', '吹バンド', '吹りバンド'],
 };
 
-// ユーザーの発言から検索キーワードを業界用語シノニムで展開する
+// ユーザーの発言や画像内容から検索キーワードを業界用語シノニムで展開する
 const expandSearchTerms = (text: string): string[] => {
   const lower = text.toLowerCase();
-  // スペースや記号で分割して単語リストを作成
   const words = lower.split(/[\s　,，、。．.!:：;；<>「」『』（）()[\]【】]/).filter(w => w.length > 0);
   const terms = new Set<string>([...words, lower]);
 
   for (const [key, synonyms] of Object.entries(INDUSTRY_SYNONYMS)) {
     const allVariants = [key.toLowerCase(), ...synonyms.map(s => s.toLowerCase())];
-    // ユーザーの入力全体、または分割された単語のいずれかがシノニムに含まれるかチェック
     if (allVariants.some(v => lower.includes(v) || words.some(w => v.includes(w) || w.includes(v)))) {
       synonyms.forEach(s => terms.add(s.toLowerCase()));
       terms.add(key.toLowerCase());
@@ -255,17 +253,35 @@ const expandSearchTerms = (text: string): string[] => {
   return Array.from(terms);
 };
 
+// 画像からキーワード（品名・型式など）を抽出する
+const extractKeywordsFromImages = async (messages: any[]): Promise<string> => {
+  const lastMsgWithImage = [...messages].reverse().find(m => m.parts.some((p: any) => p.inlineData));
+  if (!lastMsgWithImage) return "";
+
+  try {
+    const ai = getAi();
+    const prompt = "画像内の手書きメモやFAXから、資材名、型式、サイズ（20A, 50Aなど）、メーカー名をすべてカンマ区切りで書き出してください。余計な文章は不要です。";
+    const result = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: [{ role: 'user', parts: [{ text: prompt }, ...lastMsgWithImage.parts.filter((p: any) => p.inlineData)] }]
+    });
+    return result.text || "";
+  } catch (e) {
+    console.error("Keyword extraction error:", e);
+    return "";
+  }
+};
+
 // 資材をスマートフィルタリング：関連資材を最大限拾い、無関係なものは少量補完
-const buildSmartKnowledgeBase = (masterItems: Material[], messages: any[]) => {
+const buildSmartKnowledgeBase = (masterItems: Material[], messages: any[], extraKeywords: string = "") => {
   const lastUserMsg = [...messages].reverse().find((m: any) => m.role === 'user');
-  const userText = lastUserMsg?.parts?.[0]?.text || '';
+  const userText = (lastUserMsg?.parts?.[0]?.text || '') + " " + extraKeywords;
   const searchTerms = expandSearchTerms(userText);
   const hasImage = messages.some(m => m.parts.some((p: any) => p.inlineData));
 
   const scored: { item: Material; score: number }[] = [];
   const matchedCategories = new Set<string>();
 
-  // 1. まず全件からキーワードマッチを計算（画像があってもなくても実行）
   for (const item of masterItems) {
     const haystack = [item.name, item.model, item.dimensions, item.category, item.notes]
       .join(' ').toLowerCase();
@@ -273,54 +289,48 @@ const buildSmartKnowledgeBase = (masterItems: Material[], messages: any[]) => {
     let score = 0;
     for (const term of searchTerms) {
       if (haystack.includes(term)) {
-        score += term.length; // 長い単語のヒットを重視
+        score += term.length; 
         if (item.category) matchedCategories.add(item.category);
       }
     }
 
-    if (score > 0) {
-      scored.push({ item, score });
-    }
+    if (score > 0) scored.push({ item, score });
   }
 
-  // スコア順にソート
   scored.sort((a, b) => b.score - a.score);
 
   let combined: Material[] = [];
+  const limit = hasImage ? 4000 : 1000; // 画像がある場合はより広範囲に提供
 
   if (hasImage) {
-    // ===== 戦略: 写真・PDFがある場合 =====
-    // キーワードマッチしたものを最優先（画像＋テキストの組み合わせに対応）
-    // その後、マスターの先頭から合計1000件になるまで補充する
-    // (Gemini 1.5 Flash / 3 Flash の長いコンテキストを活用)
     combined = [...scored.map(s => s.item)];
     const existingIds = new Set(combined.map(i => i.id));
     
     for (const item of masterItems) {
-      if (combined.length >= 1000) break;
+      if (combined.length >= limit) break;
       if (!existingIds.has(item.id)) {
         combined.push(item);
         existingIds.add(item.id);
       }
     }
   } else {
-    // ===== 戦略: テキストのみの場合 =====
-    // ヒットしたカテゴリの他のアイテムも「準関連」として追加
-    const categoryFollowers: Material[] = [];
+    combined = scored.map(s => s.item);
+    // スコアなしでもカテゴリが一致するものを追加
     if (matchedCategories.size > 0) {
       for (const item of masterItems) {
-        if (matchedCategories.has(item.category || '') && !scored.some(s => s.item.id === item.id)) {
-          categoryFollowers.push(item);
+        if (combined.length >= 800) break;
+        if (!combined.some(c => c.id === item.id) && matchedCategories.has(item.category || '')) {
+          combined.push(item);
         }
       }
     }
-
-    // スコアあり (全件) + 同カテゴリ他商品 (最大300件) + その他 (100件)
-    combined = [
-      ...scored.map(s => s.item),
-      ...categoryFollowers.slice(0, 300),
-      ...masterItems.filter(i => !scored.some(s => s.item.id === i.id) && !categoryFollowers.some(cf => cf.id === i.id)).slice(0, 100)
-    ];
+    // 最低限の補完
+    for (const item of masterItems) {
+      if (combined.length >= 1000) break;
+      if (!combined.some(c => c.id === item.id)) {
+        combined.push(item);
+      }
+    }
   }
 
   return combined.map(i => ({
@@ -337,8 +347,15 @@ const buildSmartKnowledgeBase = (masterItems: Material[], messages: any[]) => {
 
 export const chatWithTakahashi = async (messages: any[], masterItems: Material[], screenContext: string = "TOP") => {
   const ai = getAi();
-  // スマートフィルタリング：関連資材は全件 + 適切な補完
-  const knowledgeBase = buildSmartKnowledgeBase(masterItems, messages);
+  
+  // 1. 画像が含まれる場合、まずキーワードを先読みする（2パス戦略）
+  let extraKeywords = "";
+  if (messages.some(m => m.parts.some((p: any) => p.inlineData))) {
+    extraKeywords = await extractKeywordsFromImages(messages);
+  }
+
+  // 2. 抽出されたキーワードも含めてナレッジベースを構築
+  const knowledgeBase = buildSmartKnowledgeBase(masterItems, messages, extraKeywords);
 
   const systemInstruction = `
     你是帯広的設備資材专家「AI高橋さん」。
@@ -391,13 +408,14 @@ export const chatWithTakahashi = async (messages: any[], masterItems: Material[]
     - 「黒管」「黒ガス管」「黒パイプ」= 黒SGP
 
     【アクションコマンド】
-    - カート追加: [[ACTION:ADD_CART:[{"id":"資材ID","name":"品名","quantity":数量}]]]
-    - 見積作成: [[ACTION:CREATE_ESTIMATE:[{"id":"資材IDまたは新規","name":"品名","quantity":数量,"listPrice":定価,"costPrice":原価,"model":"型式","unit":"単位"}]]]
+    - カート追加: [[ACTION:ADD_CART:[{"id":"資材ID","name":"品名","dimensions":"寸法","quantity":数量}]]]
+    - 見積作成: [[ACTION:CREATE_ESTIMATE:[{"id":"資材IDまたは新規","name":"品名","dimensions":"寸法","quantity":数量,"listPrice":定価,"costPrice":原価,"model":"型式","unit":"単位"}]]]
     - 資材登録: [[ACTION:REGISTER_ITEMS:[{"name":"品名","category":"分類","model":"型式","dimensions":"寸法","listPrice":定価,"costPrice":原価,"unit":"単位"}]]]
     - 情報更新: [[ACTION:UPDATE_INFO:{"customerName":"顧客名","siteName":"現場名"}]]
 
     【あなたの知識：取扱商品マスターリスト (Knowledge Base)】
     ※このリストを「聖書」として扱い、ここにあるIDを使って紐づけを行ってください。
+    ※寸法の情報は「dims」フィールドにあります。アクション生成時は「dimensions」として出力してください。
     ${JSON.stringify(knowledgeBase)}
   `;
 

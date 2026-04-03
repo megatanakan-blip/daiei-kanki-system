@@ -324,17 +324,27 @@ const App: React.FC = () => {
                         }
                         helpMessage={isMasterViewOpen ? "アイテム追加や価格改定があったら僕に相談しな！" : (isEstimateManagerOpen ? "なんのせ見積手伝うかい？" : (slipManagerOpen && slipManagerInitialTab === 'create' ? "伝票を起こすの手伝うかい？" : undefined))}
                         welcomeMessage={isMasterViewOpen ? "あ、高橋です。なんのせ僕に教えてくれたらやっとくよ？" : (isEstimateManagerOpen ? "あ、高橋です。なんのせFAXやメモの写真からでも見積を作れるから、僕に送ってみてな。もちろん相談しながら手入力で作るのも手伝うよ。" : (slipManagerOpen && slipManagerInitialTab === 'create' ? "なんのせお客さんのメモやFAXの写真からでも伝票起こしてあげるから任せな！" : undefined))}
-                        onAddToCart={newItems => {
-                            const slipItems: SlipItem[] = newItems.map(ni => {
+                        onAddToCart={aiItems => {
+                            const slipItems: SlipItem[] = aiItems.map(ni => {
                                 const master = items.find(i => i.id === ni.id);
                                 // 顧客・現場ルールを適用した最新単価を算出
                                 const price = master ? getAppliedPrice(master, activeCustomer, activeSite, pricingRules) : (ni.appliedPrice || 0);
-                                return { ...ni, id: master?.id || `ai-${Date.now()}`, category: master?.category || '消耗品・雑材', appliedPrice: price, updatedAt: Date.now() } as SlipItem;
+                                return {
+                                    ...ni,
+                                    id: master?.id || `ai-${Date.now()}`,
+                                    name: master?.name || ni.name,
+                                    model: master?.model || ni.model || "",
+                                    dimensions: master?.dimensions || ni.dimensions || "",
+                                    unit: master?.unit || ni.unit || "個",
+                                    category: master?.category || '消耗品・雑材',
+                                    appliedPrice: price,
+                                    updatedAt: Date.now()
+                                } as SlipItem;
                             });
-                            setCart(prev => [...prev, ...slipItems]);
-                            setSlipManagerInitialTab('create');
-                            setSlipManagerOpen(true);
-                        }}
+                             setCart(prev => [...prev, ...slipItems]);
+                             setSlipManagerInitialTab('create');
+                             setSlipManagerOpen(true);
+                         }}
                         onUpdateInfo={info => { if (info.customerName) setActiveCustomer(info.customerName); }}
                         onRegisterItems={async items => {
                             try {
@@ -344,16 +354,26 @@ const App: React.FC = () => {
                                 alert("登録に失敗しました。");
                             }
                         }}
-                        onCreateEstimate={async items => {
+                        onCreateEstimate={async aiItems => {
                             const today = new Date();
                             const valid = new Date(); valid.setDate(today.getDate() + 30);
                             const newEst: Omit<Estimate, 'id'> = {
                                 createdAt: Date.now(), date: today.toISOString().slice(0, 10), validUntil: valid.toISOString().slice(0, 10),
                                 customerName: activeCustomer || '（要確認）', constructionName: activeSite || '', 
-                                items: items.map(i => {
+                                items: aiItems.map(i => {
                                     const master = items.find(mi => mi.id === i.id);
                                     const price = master ? getAppliedPrice(master as any, activeCustomer, activeSite, pricingRules) : (i.appliedPrice || 0);
-                                    return { ...i, appliedPrice: price, deliveredQuantity: 0, updatedAt: Date.now() };
+                                    return {
+                                        ...i,
+                                        name: master?.name || i.name,
+                                        model: master?.model || i.model || "",
+                                        dimensions: master?.dimensions || i.dimensions || "",
+                                        unit: master?.unit || i.unit || "個",
+                                        category: master?.category || "消耗品・雑材",
+                                        appliedPrice: price,
+                                        deliveredQuantity: 0,
+                                        updatedAt: Date.now()
+                                    };
                                 }),
                                 totalAmount: 0, taxAmount: 0, grandTotal: 0, status: 'pending', deliveryTime: 'none', deliveryDestination: 'none',
                                 slipNumber: `EST-${Math.random().toString(36).substring(2, 8).toUpperCase()}`

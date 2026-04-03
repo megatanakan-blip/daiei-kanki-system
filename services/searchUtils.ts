@@ -124,6 +124,25 @@ export const calculateRelevanceScore = (item: MaterialItem, keywords: string[]):
     return totalScore;
 };
 
+const naturalCompare = (a: string, b: string): number => {
+    // 設備業界の寸法記号（A, W, インチ分数など）を考慮した自然順序ソート
+    const ax: any[] = [];
+    const bx: any[] = [];
+
+    // 数値と非数値の境界で分割して配列化
+    a.replace(/(\d+)|(\D+)/g, (_, $1, $2) => { ax.push([$1 || Infinity, $2 || ""]); return ""; });
+    b.replace(/(\d+)|(\D+)/g, (_, $1, $2) => { bx.push([$1 || Infinity, $2 || ""]); return ""; });
+
+    while (ax.length && bx.length) {
+        const an = ax.shift();
+        const bn = bx.shift();
+        const nn = an[0] - bn[0] || an[1].localeCompare(bn[1]);
+        if (nn) return nn;
+    }
+
+    return ax.length - bx.length;
+};
+
 export const filterAndSortItems = (items: MaterialItem[], query: string): MaterialItem[] => {
     const normalizedQuery = normalizeForSearch(query);
     const keywords = normalizedQuery.split(' ').filter(k => k.length > 0);
@@ -132,7 +151,13 @@ export const filterAndSortItems = (items: MaterialItem[], query: string): Materi
     return items
         .map(item => ({ item, score: calculateRelevanceScore(item, keywords) }))
         .filter(result => result.score >= 0)
-        .sort((a, b) => b.score - a.score)
+        .sort((a, b) => {
+            // 1. スコア順（検索クエリとの関連性）
+            if (b.score !== a.score) return b.score - a.score;
+            
+            // 2. スコアが同じなら「寸法(dimensions)」フィールドで自然順序ソート
+            return naturalCompare(a.item.dimensions || "", b.item.dimensions || "");
+        })
         .map(result => result.item);
 };
 
