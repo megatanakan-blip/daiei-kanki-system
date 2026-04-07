@@ -5,7 +5,7 @@ import { Slip, SlipItem, SlipType, DeliveryTime, DeliveryDestination, MaterialIt
 import { X, Trash2, Printer, FileText, ShoppingCart, Save, HardHat, Loader2, Edit3, FileOutput, CheckSquare, Square, Search, MapPin, Clock, Users, Info, RotateCcw, AlertTriangle, ArrowRight, Package, Layers, Check, PlusCircle, Calculator, History, Archive, FileStack, ChevronDown, ChevronRight, Building2, Eye, EyeOff, Calendar, User, UserCheck, Camera, Sparkles, Plus, Minus, MessageSquare, Edit2, LayoutGrid, FileSearch, Database, Mail, GripVertical } from 'lucide-react';
 import * as storage from '../services/firebaseService';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
-import { normalizeForSearch, filterAndSortItems } from '../services/searchUtils';
+import { normalizeForSearch, filterAndSortItems, getAppliedPrice } from '../services/searchUtils';
 import { parseReturnMemo } from '../services/geminiService';
 
 import { AppSettings } from '../types';
@@ -206,16 +206,28 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                                 <p>{info.postalCode} {info.address}</p>
                                 <p className="mt-1 font-bold">TEL: {info.phone} / FAX: {info.fax}</p>
                                 <p className="font-bold">登録番号: {info.invoiceNumber}</p>
-                                <p className="mt-1 text-slate-500 flex items-center justify-end gap-2">
-                                    発行日: 
-                                    <input 
-                                        type="date" 
-                                        value={slip.date || new Date().toISOString().split('T')[0]} 
-                                        onChange={(e) => onUpdateSlip?.({ date: e.target.value })}
-                                        className="bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-0.5 text-right w-32 print:hidden cursor-pointer hover:bg-slate-100"
-                                    />
-                                    <span className="hidden print:block">{slip.date ? new Date(slip.date).toLocaleDateString('ja-JP') : new Date().toLocaleDateString('ja-JP')}</span>
-                                </p>
+                                <div className="mt-1 flex flex-col items-end gap-0.5">
+                                    <div className="text-slate-500 flex items-center justify-end gap-2 text-[10px]">
+                                        <span className="font-bold">受注日:</span>
+                                        <input 
+                                            type="date" 
+                                            value={slip.orderDate || slip.date || new Date().toISOString().split('T')[0]} 
+                                            onChange={(e) => onUpdateSlip?.({ orderDate: e.target.value })}
+                                            className="bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-0.5 text-right w-24 print:hidden cursor-pointer hover:bg-slate-100"
+                                        />
+                                        <span className="hidden print:block">{slip.orderDate || slip.date ? new Date(slip.orderDate || slip.date).toLocaleDateString('ja-JP') : new Date().toLocaleDateString('ja-JP')}</span>
+                                    </div>
+                                    <div className="text-slate-500 flex items-center justify-end gap-2 text-[10px]">
+                                        <span className="font-bold">出庫日:</span>
+                                        <input 
+                                            type="date" 
+                                            value={slip.date || new Date().toISOString().split('T')[0]} 
+                                            onChange={(e) => onUpdateSlip?.({ date: e.target.value })}
+                                            className="bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-0.5 text-right w-24 print:hidden cursor-pointer hover:bg-slate-100"
+                                        />
+                                        <span className="hidden print:block">{slip.date ? new Date(slip.date).toLocaleDateString('ja-JP') : new Date().toLocaleDateString('ja-JP')}</span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -949,9 +961,10 @@ export const SlipManager: React.FC<{
     }, [itemSearchQuery, masterItems, activeMode, siteHistoryItems]);
 
     const handleAddFromMaster = (item: any) => {
+        const price = getAppliedPrice(item, customerName, siteName, pricingRules);
         const itemToAdd = activeMode === 'return' 
-            ? { ...item, quantity: -1, deliveredQuantity: 0 }
-            : { ...item, quantity: 1, appliedPrice: item.sellingPrice || item.appliedPrice, deliveredQuantity: 1 };
+            ? { ...item, quantity: -1, deliveredQuantity: 0, appliedPrice: price }
+            : { ...item, quantity: 1, appliedPrice: price, deliveredQuantity: 1 };
         
         onUpdateCart(prev => [...prev, itemToAdd]);
         setItemSearchQuery(''); setShowItemSuggestions(false);
@@ -972,9 +985,10 @@ export const SlipManager: React.FC<{
     const handleBulkAdd = () => {
         if (selectedSuggestions.size === 0) return;
         const itemsToAdd = Array.from(selectedSuggestions.values()).map((item: any) => {
+            const price = getAppliedPrice(item, customerName, siteName, pricingRules);
             return activeMode === 'return'
-                ? { ...item, quantity: -1, deliveredQuantity: 0 }
-                : { ...item, quantity: 1, appliedPrice: item.sellingPrice || item.appliedPrice, deliveredQuantity: 1 };
+                ? { ...item, quantity: -1, deliveredQuantity: 0, appliedPrice: price }
+                : { ...item, quantity: 1, appliedPrice: price, deliveredQuantity: 1 };
         });
         onUpdateCart(prev => [...prev, ...itemsToAdd]);
         setItemSearchQuery(''); setShowItemSuggestions(false);
@@ -1542,6 +1556,10 @@ export const SlipManager: React.FC<{
                                                 settings={settings}
                                                 onUpdateSlip={(updates) => {
                                                     setPrintingSlips(prev => prev.map((s, i) => i === idx ? { ...s, ...updates } : s));
+                                                    const baseId = slip.id ? slip.id.replace(/-pg\d+$/, '') : null;
+                                                    if (baseId && !baseId.startsWith('cover-') && baseId.length > 10) {
+                                                        storage.updateSlip(baseId, updates).catch(console.error);
+                                                    }
                                                 }}
                                             />
                                         </div>
@@ -1843,6 +1861,13 @@ export const SlipManager: React.FC<{
                                                                         </div>
                                                                     </div>
                                                                     <div className="flex items-center justify-end gap-3 shrink-0">
+                                                                        <button 
+                                                                            onClick={() => sl.id && storage.updateSlip(sl.id, { isReviewed: !sl.isReviewed })} 
+                                                                            className={`p-2.5 rounded-xl transition-all flex items-center gap-1.5 ${sl.isReviewed ? 'text-emerald-500 bg-emerald-50/50 hover:bg-emerald-100' : 'text-slate-300 hover:text-emerald-500 hover:bg-emerald-50'}`}
+                                                                            title={sl.isReviewed ? "確認済み (クリックで解除)" : "未確認 (クリックで確認完了)"}
+                                                                        >
+                                                                            {sl.isReviewed ? <CheckSquare size={18} /> : <Square size={18} />}
+                                                                        </button>
                                                                         <button onClick={() => { setPrintingSlips([sl]); }} className="p-2.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all" title="再印刷">
                                                                             <Printer size={18} />
                                                                         </button>

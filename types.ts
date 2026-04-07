@@ -128,6 +128,7 @@ export interface Slip {
   previousBillingAmount?: number; // 前回御請求額
   paymentReceived?: number;       // 今回御入金額
   carriedForwardAmount?: number;  // 繰越残高
+  isReviewed?: boolean;           // 伝票確認済みフラグ
 }
 
 export type EstimateStatus = 'pending' | 'accepted' | 'rejected' | 'converted';
