@@ -408,7 +408,6 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                                         <div>{item?.name || ''}</div>
                                         {item?.manufacturer && <div className="text-[8px] text-slate-500 font-normal leading-tight">{item.manufacturer}</div>}
                                         {item?.sourceSlipNo && <div className="text-[7px] text-slate-400 font-mono leading-none mt-0.5">伝票: {item.sourceSlipNo}</div>}
-                                        {item?.slipItemNote && <div className="text-[7px] text-amber-600 font-bold opacity-70 leading-none mt-1 print:hidden">※{item.slipItemNote}</div>}
                                     </td>
                                     <td className="px-2 border-r truncate">{item ? `${item.model} ${item.dimensions}` : ''}</td>
 
@@ -682,13 +681,22 @@ const CartItemRow = React.memo(({
                                 onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, appliedPrice: parseInt(e.target.value) || 0 } : pi))}
                                 className="w-full py-2 border rounded-xl text-center font-black bg-slate-50 outline-none text-emerald-600"
                             />
-                            <button 
-                                onClick={() => setIsNoteOpen(!isNoteOpen)}
-                                className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[9px] font-black transition-all ${isNoteOpen ? 'bg-amber-100 text-amber-600' : 'text-slate-300 hover:text-amber-400 hover:bg-amber-50'}`}
-                            >
-                                <MessageSquare size={12} />
-                                {isNoteOpen ? 'メモを閉じる' : 'メモを追加'}
-                            </button>
+                            <div className="flex items-center gap-1 mt-1">
+                                <button 
+                                    onClick={() => setIsNoteOpen(!isNoteOpen)}
+                                    className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[9px] font-black transition-all ${isNoteOpen ? 'bg-amber-100 text-amber-600' : 'text-slate-300 hover:text-amber-400 hover:bg-amber-50'}`}
+                                >
+                                    <MessageSquare size={12} />
+                                    {isNoteOpen ? '閉じる' : 'メモ'}
+                                </button>
+                                <button 
+                                    onClick={() => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, name: pi.name.includes('※特値') ? pi.name.replace(' ※特値', '').replace('※特値', '').trim() : `${pi.name} ※特値` } : pi))}
+                                    className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[9px] font-black transition-all ${item.name.includes('※特値') ? 'bg-rose-100 text-rose-600' : 'text-slate-300 hover:text-rose-400 hover:bg-rose-50'}`}
+                                >
+                                    <Sparkles size={12} />
+                                    特値
+                                </button>
+                            </div>
                         </div>
                     </td>
                     <td className="text-right">
@@ -1670,7 +1678,10 @@ export const SlipManager: React.FC<{
                                                                                     </div>
                                                                                 </div>
                                                                                 <div className="flex justify-between items-center">
-                                                                                    <span className="text-[10px] text-slate-400 font-mono truncate">{i.model} {i.dimensions}</span>
+                                                                                    <span className="text-[10px] text-slate-400 font-mono truncate">
+                                                                                        {i.manufacturer && <span className="mr-2 text-slate-500 bg-slate-100 px-1 font-bold rounded">{i.manufacturer}</span>}
+                                                                                        {i.model} {i.dimensions}
+                                                                                    </span>
                                                                                     <span className="text-[9px] font-bold text-slate-300 group-hover:text-blue-400 transition-colors">クリックで即時追加</span>
                                                                                 </div>
                                                                             </div>
