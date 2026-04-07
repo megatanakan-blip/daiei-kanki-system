@@ -103,6 +103,8 @@ export interface Slip {
   slipNumber?: string;
   createdAt: number;
   date: string;
+  orderDate?: string;    // 受注日
+  shippingDate?: string; // 出庫日/希望日
   customerName: string;
   constructionName?: string;
   type: SlipType;

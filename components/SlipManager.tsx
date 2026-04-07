@@ -596,19 +596,19 @@ const CartItemRow = React.memo(({
                                     value={item.manufacturer || ''}
                                     onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, manufacturer: e.target.value } : pi))}
                                     placeholder="メーカー"
-                                    className="text-[10px] bg-white/50 border border-slate-200 rounded px-1.5 py-0.5"
+                                    className="text-xs font-bold text-slate-700 bg-white/50 border border-slate-200 rounded px-2 py-1 outline-none focus:border-blue-400"
                                 />
                                 <input
                                     value={item.model || ''}
                                     onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, model: e.target.value } : pi))}
                                     placeholder="型式"
-                                    className="text-[10px] bg-white/50 border border-slate-200 rounded px-1.5 py-0.5"
+                                    className="text-xs font-bold text-slate-700 bg-white/50 border border-slate-200 rounded px-2 py-1 outline-none focus:border-blue-400"
                                 />
                                 <input
                                     value={item.dimensions || ''}
                                     onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, dimensions: e.target.value } : pi))}
                                     placeholder="寸法"
-                                    className="col-span-2 text-[10px] bg-white/50 border border-slate-200 rounded px-1.5 py-0.5"
+                                    className="col-span-2 text-xs font-bold text-slate-700 bg-white/50 border border-slate-200 rounded px-2 py-1 outline-none focus:border-blue-400"
                                 />
                             </div>
                             <div className="flex items-center gap-1 mt-1">
@@ -803,6 +803,7 @@ export const SlipManager: React.FC<{
     const [orderingPerson, setOrderingPerson] = useState('');
     const [receivingPerson, setReceivingPerson] = useState('');
     const [slipDate, setSlipDate] = useState(new Date().toISOString().slice(0, 10));
+    const [orderDate, setOrderDate] = useState(new Date().toISOString().slice(0, 10));
     const [time, setTime] = useState<DeliveryTime>('none');
     const [dest, setDest] = useState<DeliveryDestination>('none');
     const [note, setNote] = useState('');
@@ -1073,7 +1074,7 @@ export const SlipManager: React.FC<{
 
             if (editingSlipId) {
                 const updateData: Partial<Slip> = {
-                    date: slipDate, customerName, constructionName: siteName, items: processedItems,
+                    date: slipDate, orderDate, customerName, constructionName: siteName, items: processedItems,
                     totalAmount: total, taxAmount: Math.round(total * 0.1), grandTotal: Math.round(total * 1.1),
                     note, deliveryTime: time, deliveryDestination: dest, orderingPerson, receivingPerson
                 };
@@ -1090,7 +1091,7 @@ export const SlipManager: React.FC<{
                 const gid = generateId();
                 const sNo = generateSlipNumber();
                 const newSlip: Omit<Slip, 'id'> = {
-                    createdAt: Date.now(), date: slipDate, customerName, constructionName: siteName, items: processedItems.map(i => ({ ...i, sourceSlipNo: sNo })),
+                    createdAt: Date.now(), date: slipDate, orderDate, customerName, constructionName: siteName, items: processedItems.map(i => ({ ...i, sourceSlipNo: sNo })),
                     totalAmount: total, taxAmount: Math.round(total * 0.1), grandTotal: Math.round(total * 1.1),
                     note, deliveryTime: time, deliveryDestination: dest, groupId: gid, slipNumber: sNo,
                     orderingPerson, receivingPerson, type: activeMode === 'return' ? 'return' : 'outbound', isClosed: activeMode === 'return'
@@ -1315,6 +1316,7 @@ export const SlipManager: React.FC<{
         setOrderingPerson(s.orderingPerson || '');
         setReceivingPerson(s.receivingPerson || '');
         setSlipDate(s.date);
+        setOrderDate(s.orderDate || s.date);
         setTime(s.deliveryTime);
         setDest(s.deliveryDestination);
         setNote(s.note || '');
@@ -1415,7 +1417,7 @@ export const SlipManager: React.FC<{
                                         <tr key={i.id} className={isOver || isNegative ? 'bg-rose-50/30' : ''}>
                                             <td className="py-3">
                                                 <div className="font-bold">{i.name}</div>
-                                                <div className="text-[10px] text-slate-400 font-mono">{i.model} {i.dimensions}</div>
+                                                <div className="text-xs text-slate-600 font-bold font-mono tracking-tight">{i.model} {i.dimensions}</div>
                                             </td>
                                             <td className="text-center font-bold text-slate-400">{i.quantity}</td>
                                             <td>
@@ -1611,8 +1613,9 @@ export const SlipManager: React.FC<{
                                         <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">配送先指定</label><select value={dest} onChange={e => setDest(e.target.value as any)} className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold outline-none focus:ring-2 focus:ring-blue-500">{Object.entries(DestLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
                                         <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">希望配送時間</label><select value={time} onChange={e => setTime(e.target.value as any)} className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold outline-none focus:ring-2 focus:ring-blue-500">{Object.entries(DeliveryTimeLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
                                     </div>
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div className="relative"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">日付</label><input type="date" value={slipDate} onChange={e => setSlipDate(e.target.value)} className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold" /></div>
+                                    <div className="grid grid-cols-3 gap-4">
+                                        <div className="relative"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">受注日</label><input type="date" value={orderDate} onChange={e => setOrderDate(e.target.value)} className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" /></div>
+                                        <div className="relative"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">出庫日</label><input type="date" value={slipDate} onChange={e => setSlipDate(e.target.value)} className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" /></div>
                                         <div>
                                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">備考</label>
                                             <textarea 
@@ -1678,8 +1681,8 @@ export const SlipManager: React.FC<{
                                                                                     </div>
                                                                                 </div>
                                                                                 <div className="flex justify-between items-center">
-                                                                                    <span className="text-[10px] text-slate-400 font-mono truncate">
-                                                                                        {i.manufacturer && <span className="mr-2 text-slate-500 bg-slate-100 px-1 font-bold rounded">{i.manufacturer}</span>}
+                                                                                    <span className="text-xs text-slate-700 font-mono font-bold truncate tracking-tight">
+                                                                                        {i.manufacturer && <span className="mr-2 text-slate-500 bg-slate-100 px-1.5 py-0.5 text-[10px] font-black rounded">{i.manufacturer}</span>}
                                                                                         {i.model} {i.dimensions}
                                                                                     </span>
                                                                                     <span className="text-[9px] font-bold text-slate-300 group-hover:text-blue-400 transition-colors">クリックで即時追加</span>
