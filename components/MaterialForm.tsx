@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { MaterialItem, MATERIAL_CATEGORIES, AppSettings } from '../types';
 import { Plus, Save, X, Link as LinkIcon, Calculator, RotateCcw, Box, Ruler, MapPin, Settings2 } from 'lucide-react';
 
@@ -40,6 +40,8 @@ export const MaterialForm: React.FC<MaterialFormProps> = ({ onSave, onClose, ini
   const [calcType, setCalcType] = useState<'selling_from_list' | 'selling_from_cost' | 'cost_from_list'>('selling_from_list');
   const [showCategoryManager, setShowCategoryManager] = useState(false);
   const [newCategoryInput, setNewCategoryInput] = useState('');
+  // 定価編集開始時の値を保持する（掴け率スライド用）
+  const prevListPriceRef = useRef<number>(0);
 
   useEffect(() => {
     if (initialData) {
@@ -297,7 +299,42 @@ export const MaterialForm: React.FC<MaterialFormProps> = ({ onSave, onClose, ini
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="space-y-1.5">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">定価</label>
-                <input type="number" name="listPrice" value={formData.listPrice} onChange={e => setFormData(p => ({ ...p, listPrice: e.target.value }))} placeholder="0 (オープン)" className="w-full px-4 py-3 bg-white border-2 border-slate-100 rounded-2xl font-mono font-bold text-slate-700 focus:border-blue-500 outline-none transition-all" />
+                <input
+                  type="number"
+                  name="listPrice"
+                  value={formData.listPrice}
+                  onFocus={() => {
+                    // 編集開始時の定価を記憶しておく
+                    prevListPriceRef.current = parseFloat(formData.listPrice) || 0;
+                  }}
+                  onChange={e => setFormData(p => ({ ...p, listPrice: e.target.value }))}
+                  onBlur={() => {
+                    // 定価変更時：仕入値・売値の掛け率を定価変更分だけスライド
+                    const newListPrice = parseFloat(formData.listPrice) || 0;
+                    const oldListPrice = prevListPriceRef.current;
+                    
+                    // 定価が有効な値で、かつ変更されている場合にスライド計算を行う
+                    if (newListPrice > 0 && oldListPrice > 0 && newListPrice !== oldListPrice) {
+                      const costValue = parseFloat(formData.costPrice) || 0;
+                      const sellingValue = parseFloat(formData.sellingPrice) || 0;
+                      
+                      // 掛け率を計算して新定価に適用
+                      const newCost = Math.round(newListPrice * (costValue / oldListPrice));
+                      const newSelling = Math.round(newListPrice * (sellingValue / oldListPrice));
+                      
+                      setFormData(p => ({
+                        ...p,
+                        costPrice: newCost.toString(),
+                        sellingPrice: newSelling.toString()
+                      }));
+                      
+                      // 参考値を更新
+                      prevListPriceRef.current = newListPrice;
+                    }
+                  }}
+                  placeholder="0 (オープン)"
+                  className="w-full px-4 py-3 bg-white border-2 border-slate-100 rounded-2xl font-mono font-bold text-slate-700 focus:border-blue-500 outline-none transition-all"
+                />
               </div>
               <div className="space-y-1.5">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex justify-between items-center">

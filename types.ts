@@ -47,9 +47,13 @@ export interface Material {
   listPrice: number;
   sellingPrice: number;
   costPrice: number; // 仕入値
-  previousListPrice?: number; // 旧定価
-  previousCostPrice?: number; // 旧仕入値
-  priceUpdatedDate?: string; // 価格改定日
+  previousListPrice?: number; // 旧定価（改定後に退避）
+  previousCostPrice?: number; // 旧仕入値（改定後に退避）
+  priceUpdatedDate?: string; // 実際に改定された日
+  scheduledListPrice?: number; // 予告改定：新定価
+  scheduledCostPrice?: number; // 予告改定：新仕入値
+  scheduledSellingPrice?: number; // 予告改定：新標準売価
+  scheduledPriceDate?: string; // 予告改定：改定予定日 (YYYY-MM-DD)
   sourceUrl?: string;
   updatedAt: number;
 }

@@ -66,7 +66,7 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
     onPrint
 }) => {
     const [filters, setFilters] = React.useState({ category: '', name: '', manufacturer: '', model: '', location: '' });
-    const [showRevisedOnly, setShowRevisedOnly] = React.useState(false); // 価格改定ありのみ表示
+    const [showScheduled, setShowScheduled] = React.useState(false); // 予告改定表示モード
     const [calcRate, setCalcRate] = React.useState<string>('');
     const [calcType, setCalcType] = React.useState<'list_selling_rate' | 'list_cost_rate' | 'cost_markup' | 'cost_rate' | 'fixed'>('list_selling_rate');
     const [isProcessing, setIsProcessing] = React.useState(false);
@@ -74,6 +74,12 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
     const [editingListPriceId, setEditingListPriceId] = React.useState<string | null>(null);
     const [tempPrice, setTempPrice] = React.useState<string>('');
     const [tempListPrice, setTempListPrice] = React.useState<string>('');
+    // 予告改定入力用 state
+    const [editingScheduledId, setEditingScheduledId] = React.useState<string | null>(null);
+    const [scheduledListPrice, setScheduledListPrice] = React.useState('');
+    const [scheduledCostPrice, setScheduledCostPrice] = React.useState('');
+    const [scheduledSellingPrice, setScheduledSellingPrice] = React.useState('');
+    const [scheduledDate, setScheduledDate] = React.useState('');
 
     const handlePriceUpdate = async (item: MaterialItem, value: string) => {
         const price = parseFloat(value);
@@ -105,12 +111,54 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
         }
 
         try {
+            const newListPrice = price;
+            const oldListPrice = item.listPrice;
+            
+            const updateData: any = { 
+                listPrice: newListPrice, 
+                previousListPrice: oldListPrice, 
+                priceUpdatedDate: new Date().toISOString() 
+            };
+
+            // 旧定価に対する掛け率を算出してスライド
+            if (newListPrice > 0 && oldListPrice > 0) {
+                const costRate = item.costPrice / oldListPrice;
+                const sellingRate = item.sellingPrice / oldListPrice;
+                updateData.costPrice = Math.round(newListPrice * costRate);
+                updateData.sellingPrice = Math.round(newListPrice * sellingRate);
+            }
+
             // マスターの情報を直接更新する
-            await onBulkUpdate([{ id: item.id, data: { listPrice: price, previousListPrice: item.listPrice, priceUpdatedDate: new Date().toISOString() } }]);
+            await onBulkUpdate([{ id: item.id, data: updateData }]);
             setEditingListPriceId(null);
         } catch (e) {
             alert("定価の更新に失敗しました。");
         }
+    };
+
+    const handleSaveScheduled = async (item: MaterialItem) => {
+        if (!scheduledDate) { alert('改定予定日を入力してください。'); return; }
+        if (!scheduledListPrice) { alert('新定価を入力してください。'); return; }
+
+        try {
+            await storage.updateMaterial(item.id, {
+                scheduledPriceDate: scheduledDate,
+                scheduledListPrice: parseFloat(scheduledListPrice),
+            });
+            setEditingScheduledId(null);
+        } catch (e) { alert('予告改定の保存に失敗しました。'); }
+    };
+
+    const handleClearScheduled = async (item: MaterialItem) => {
+        if (!window.confirm(`「${item.name}」の予告改定情報を取り消しますか？`)) return;
+        try {
+            await storage.updateMaterial(item.id, {
+                scheduledListPrice: undefined,
+                scheduledCostPrice: undefined,
+                scheduledSellingPrice: undefined,
+                scheduledPriceDate: undefined,
+            });
+        } catch (e) { alert('予告改定の取り消しに失敗しました。'); }
     };
 
     const handleBulkCalc = async () => {
@@ -185,18 +233,36 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
         return config.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />;
     };
 
-    const isSearchActive = Object.values(filters).some(v => v !== '') || showRevisedOnly;
+    const isSearchActive = Object.values(filters).some(v => v !== '') || showScheduled;
 
     const filteredItems = !isSearchActive ? [] : items.filter(item => {
-        return (
+        const baseFilter =
             (!filters.category || item.category.includes(filters.category)) &&
             (!filters.name || item.name.toLowerCase().includes(filters.name.toLowerCase())) &&
             (!filters.manufacturer || (item.manufacturer || '').toLowerCase().includes(filters.manufacturer.toLowerCase())) &&
             (!filters.model || `${item.model || ''} ${item.dimensions || ''} `.toLowerCase().includes(filters.model.toLowerCase())) &&
-            (!filters.location || (item.location || '').toLowerCase().includes(filters.location.toLowerCase())) &&
-            (!showRevisedOnly || (item.previousListPrice && item.previousListPrice !== item.listPrice) || (item.previousCostPrice && item.previousCostPrice !== item.costPrice))
-        );
+            (!filters.location || (item.location || '').toLowerCase().includes(filters.location.toLowerCase()));
+
+        if (!baseFilter) return false;
+        // 予告改定モード：予告改定情報がある資材のみ
+        if (showScheduled) return !!item.scheduledPriceDate;
+        return true;
     });
+
+    const naturalSort = (aStr: string, bStr: string, dir: number): number => {
+        const aParts = String(aStr).split(/(\d+)/);
+        const bParts = String(bStr).split(/(\d+)/);
+        for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
+            const ap = aParts[i] || '';
+            const bp = bParts[i] || '';
+            if (ap === bp) continue;
+            const an = parseInt(ap, 10);
+            const bn = parseInt(bp, 10);
+            if (!isNaN(an) && !isNaN(bn)) return (an - bn) * dir;
+            return ap.localeCompare(bp, undefined, { numeric: true, sensitivity: 'base' }) * dir;
+        }
+        return 0;
+    };
 
     const sortedItems = [...filteredItems].sort((a, b) => {
         const field = sortConfig.field;
@@ -214,23 +280,13 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
 
         const direction = sortConfig.direction === 'asc' ? 1 : -1;
 
-        // 型式や寸法のための自然順序付け (plumbing aware)
+        // 型式・寸法・品名は自然順ソート
         if (field === 'dimensions' || field === 'model' || field === 'name') {
-            const aParts = String(aVal).split(/(\d+)/);
-            const bParts = String(bVal).split(/(\d+)/);
-            
-            for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
-                const ap = aParts[i] || "";
-                const bp = bParts[i] || "";
-                if (ap === bp) continue;
-                
-                const an = parseInt(ap, 10);
-                const bn = parseInt(bp, 10);
-                
-                if (!isNaN(an) && !isNaN(bn)) {
-                    return (an - bn) * direction;
-                }
-                return ap.localeCompare(bp, undefined, { numeric: true, sensitivity: 'base' }) * direction;
+            const primary = naturalSort(String(aVal), String(bVal), direction);
+            if (primary !== 0) return primary;
+            // 同名の場合は寸法で数値昇順に二次ソート
+            if (field !== 'dimensions') {
+                return naturalSort(String(a.dimensions ?? ''), String(b.dimensions ?? ''), 1);
             }
             return 0;
         }
@@ -255,10 +311,14 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
                 </div>
 
                 <button
-                    onClick={() => setShowRevisedOnly(!showRevisedOnly)}
-                    className={`px-3 py-2 rounded-xl text-xs font-black transition-all border ${showRevisedOnly ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-white text-slate-400 border-slate-200 hover:text-slate-600'}`}
+                    onClick={() => setShowScheduled(!showScheduled)}
+                    className={`px-3 py-2 rounded-xl text-xs font-black transition-all border flex items-center gap-1.5 ${
+                        showScheduled
+                            ? 'bg-violet-100 text-violet-700 border-violet-300 shadow-inner'
+                            : 'bg-white text-slate-400 border-slate-200 hover:text-violet-600 hover:border-violet-200'
+                    }`}
                 >
-                    {showRevisedOnly ? '★ 価格改定ありを表示中' : '☆ 改定履歴を表示'}
+                    {showScheduled ? '📅 予告改定を表示中' : '📅 予告改定'}
                 </button>
 
                 <div className="flex items-center gap-2 bg-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl border border-slate-200 shadow-sm min-w-0">
@@ -483,6 +543,19 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
                                                         (仕¥{Math.floor(item.previousCostPrice).toLocaleString()})
                                                     </span>
                                                 )}
+                                                {/* 予告改定バッジ */}
+                                                {item.scheduledPriceDate && (
+                                                    <div className="mt-1 flex flex-col items-end gap-0.5">
+                                                        <span className="text-[8px] font-black text-violet-600 bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded-full uppercase tracking-wider">
+                                                            📅 {item.scheduledPriceDate} 改定予定
+                                                        </span>
+                                                        {item.scheduledListPrice !== undefined && (
+                                                            <span className="text-[9px] font-mono font-bold text-violet-500">
+                                                                → 定¥{Math.floor(item.scheduledListPrice).toLocaleString()}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
                                         </td>
                                         <td className="p-4 text-right">
@@ -544,7 +617,55 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
                                                 >
                                                     <Edit2 size={16} />
                                                 </button>
+                                                {/* 予告改定ボタン */}
+                                                <button
+                                                    title="予告改定を設定"
+                                                    onClick={() => {
+                                                        setEditingScheduledId(item.id);
+                                                        setScheduledListPrice(item.scheduledListPrice?.toString() ?? '');
+                                                        setScheduledCostPrice(item.scheduledCostPrice?.toString() ?? '');
+                                                        setScheduledSellingPrice(item.scheduledSellingPrice?.toString() ?? '');
+                                                        setScheduledDate(item.scheduledPriceDate ?? '');
+                                                    }}
+                                                    className={`p-2.5 rounded-xl transition-all ${
+                                                        item.scheduledPriceDate
+                                                            ? 'bg-violet-100 text-violet-600 hover:bg-violet-200'
+                                                            : 'text-slate-300 hover:text-violet-500 hover:bg-violet-50'
+                                                    }`}
+                                                >
+                                                    📅
+                                                </button>
                                             </div>
+                                            {/* 予告改定入力パネル */}
+                                            {editingScheduledId === item.id && (
+                                                <div className="mt-2 p-3 bg-violet-50 border border-violet-200 rounded-xl shadow-lg space-y-2 animate-in slide-in-from-right-2 z-10 min-w-[200px]">
+                                                    <p className="text-[9px] font-black text-violet-600 uppercase tracking-widest">📅 予告改定</p>
+                                                    <div className="flex flex-col gap-1.5">
+                                                        <label className="text-[9px] font-bold text-slate-500">改定予定日</label>
+                                                        <input type="date" value={scheduledDate} onChange={e => setScheduledDate(e.target.value)}
+                                                            className="w-full px-2 py-1.5 text-xs font-bold border-2 border-violet-200 rounded-lg outline-none focus:border-violet-400 bg-white" />
+                                                        <label className="text-[9px] font-bold text-slate-500">新定価</label>
+                                                        <input type="number" placeholder={`現在: ¥${item.listPrice?.toLocaleString()}`} value={scheduledListPrice} onChange={e => setScheduledListPrice(e.target.value)}
+                                                            className="w-full px-2 py-1.5 text-xs font-mono font-bold border-2 border-violet-200 rounded-lg outline-none focus:border-violet-400 bg-white" />
+                                                    </div>
+                                                    <div className="flex gap-1.5 pt-1">
+                                                        {item.scheduledPriceDate && (
+                                                            <button onClick={() => { setEditingScheduledId(null); handleClearScheduled(item); }}
+                                                                className="flex-1 py-1.5 text-[10px] font-black text-rose-500 bg-rose-50 border border-rose-200 rounded-lg hover:bg-rose-100 transition-colors">
+                                                                取消
+                                                            </button>
+                                                        )}
+                                                        <button onClick={() => setEditingScheduledId(null)}
+                                                            className="flex-1 py-1.5 text-[10px] font-black text-slate-500 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors">
+                                                            閉じる
+                                                        </button>
+                                                        <button onClick={() => handleSaveScheduled(item)}
+                                                            className="flex-[2] py-1.5 text-[10px] font-black text-white bg-violet-600 rounded-lg hover:bg-violet-700 transition-colors">
+                                                            保存
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
                                         </td>
                                     </tr>
                                 );

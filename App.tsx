@@ -81,6 +81,55 @@ const App: React.FC = () => {
         };
     }, [currentUser, isAuthLoading]);
 
+    // 改定予定日チェック：改定日になった資材を自動適用
+    useEffect(() => {
+        if (items.length === 0) return;
+        const today = new Date().toISOString().slice(0, 10);
+        const dueItems = items.filter(item =>
+            item.scheduledPriceDate &&
+            item.scheduledPriceDate <= today &&
+            (item.scheduledListPrice !== undefined || item.scheduledCostPrice !== undefined || item.scheduledSellingPrice !== undefined)
+        );
+        if (dueItems.length === 0) return;
+
+        // 自動適用：旧価格を退避して新価格をセット（仕入値・売値は掛け率スライド）
+        Promise.all(dueItems.map(item => {
+            const newListPrice = item.scheduledListPrice ?? item.listPrice;
+
+            // 旧定価に対する仕入値・売値の掛け率を算出してスライド
+            // 旧定価が0のときはそのまま据え置き
+            const costRate    = (item.listPrice > 0 && item.costPrice > 0)
+                ? item.costPrice    / item.listPrice : null;
+            const sellingRate = (item.listPrice > 0 && item.sellingPrice > 0)
+                ? item.sellingPrice / item.listPrice : null;
+
+            const newCostPrice    = costRate    !== null ? Math.round(newListPrice * costRate)    : item.costPrice;
+            const newSellingPrice = sellingRate !== null ? Math.round(newListPrice * sellingRate) : item.sellingPrice;
+
+            const updates: Partial<typeof item> = {
+                priceUpdatedDate: item.scheduledPriceDate,
+                // 旧価格を退避
+                previousListPrice: item.listPrice,
+                previousCostPrice: item.costPrice,
+                // 新価格を適用
+                listPrice:    newListPrice,
+                costPrice:    newCostPrice,
+                sellingPrice: newSellingPrice,
+                // 予告情報をクリア
+                scheduledListPrice:    undefined,
+                scheduledCostPrice:    undefined,
+                scheduledSellingPrice: undefined,
+                scheduledPriceDate:    undefined,
+            };
+            return storage.updateMaterial(item.id, updates);
+        })).then(() => {
+            if (dueItems.length > 0) {
+                console.log(`[予告改定] ${dueItems.length}件の価格改定を自動適用（仕入値・売値は掛け率スライド）。`);
+            }
+        }).catch(err => console.error('予告改定自動適用エラー:', err));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [items.length > 0 ? items[0]?.updatedAt : 0]);
+
     const handleAIUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
