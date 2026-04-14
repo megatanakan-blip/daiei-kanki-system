@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { MessageSquare, X, Send, User, Bot, Loader2, Sparkles, ShoppingCart, MapPin, Building2, ExternalLink, Globe, FileText, CheckCircle, PackageCheck, FileSpreadsheet, RotateCcw, Trash2, ChevronRight, Check, AlertCircle, Camera, Image as ImageIcon } from 'lucide-react';
 import { MaterialItem, SlipItem } from '../types';
 import * as gemini from '../services/geminiService';
+import * as XLSX from 'xlsx';
 
 interface Source {
   uri: string;
@@ -47,7 +48,7 @@ export const AITakahashi: React.FC<AITakahashiProps> = ({ masterItems, onAddToCa
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedImage, setSelectedImage] = useState<{ file: File, base64: string } | null>(null);
+  const [selectedFile, setSelectedFile] = useState<{ file: File, base64?: string; text?: string } | null>(null);
   const [isHovered, setIsHovered] = useState(false);
 
   const defaultMessage: Message = {
@@ -81,12 +82,38 @@ export const AITakahashi: React.FC<AITakahashiProps> = ({ masterItems, onAddToCa
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = (reader.result as string).split(',')[1];
-      setSelectedImage({ file, base64 });
-    };
-    reader.readAsDataURL(file);
+    if (file.type.startsWith('image/') || file.type === 'application/pdf') {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = (reader.result as string).split(',')[1];
+        setSelectedFile({ file, base64 });
+      };
+      reader.readAsDataURL(file);
+    } else {
+      // Excel/CSV/Text handling
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = new Uint8Array(e.target?.result as ArrayBuffer);
+          const workbook = XLSX.read(data, { type: 'array' });
+          let fullText = "";
+          workbook.SheetNames.forEach(sheetName => {
+            const sheet = workbook.Sheets[sheetName];
+            const csv = XLSX.utils.sheet_to_csv(sheet);
+            fullText += `--- シート: ${sheetName} ---\n${csv}\n\n`;
+          });
+          setSelectedFile({ file, text: fullText });
+        } catch (err) {
+          // fallback to text
+          const textReader = new FileReader();
+          textReader.onload = (re) => {
+            setSelectedFile({ file, text: re.target?.result as string });
+          };
+          textReader.readAsText(file);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
   };
 
   const tryRepairJSON = (str: string): any => {
@@ -135,15 +162,22 @@ export const AITakahashi: React.FC<AITakahashiProps> = ({ masterItems, onAddToCa
 
   const handleSend = async (textOverride?: string) => {
     const finalInput = textOverride || input;
-    if (!finalInput.trim() && !selectedImage && !isLoading) return;
+    if (!finalInput.trim() && !selectedFile && !isLoading) return;
 
     const userParts: MessagePart[] = [];
-    if (finalInput.trim()) userParts.push({ text: finalInput });
-    if (selectedImage) {
+    
+    if (selectedFile?.text) {
+      const fileContext = `【アップロードファイル内容: ${selectedFile.file.name}】\n${selectedFile.text}\n\n`;
+      userParts.push({ text: finalInput.trim() ? `${fileContext}質問: ${finalInput}` : `${fileContext}このファイルの内容を確認して、概要を教えてください。` });
+    } else {
+      if (finalInput.trim()) userParts.push({ text: finalInput });
+    }
+
+    if (selectedFile?.base64) {
       userParts.push({
         inlineData: {
-          mimeType: selectedImage.file.type || 'image/jpeg',
-          data: selectedImage.base64
+          mimeType: selectedFile.file.type || 'image/jpeg',
+          data: selectedFile.base64
         }
       });
     }
@@ -151,12 +185,16 @@ export const AITakahashi: React.FC<AITakahashiProps> = ({ masterItems, onAddToCa
     const userMsg: Message = {
       role: 'user',
       parts: userParts,
-      imagePreview: selectedImage ? `data:${selectedImage.file.type};base64,${selectedImage.base64}` : undefined
+      imagePreview: selectedFile?.base64 
+        ? `data:${selectedFile.file.type};base64,${selectedFile.base64}` 
+        : selectedFile?.text 
+          ? 'FILE_TEXT_PREVIEW' 
+          : undefined
     };
 
     setMessages(prev => [...prev, userMsg]);
     setInput('');
-    setSelectedImage(null);
+    setSelectedFile(null);
     setIsLoading(true);
 
     try {
@@ -257,7 +295,12 @@ export const AITakahashi: React.FC<AITakahashiProps> = ({ masterItems, onAddToCa
                 <div className={`max-w-[95%] sm:max-w-[90%] p-3 sm:p-4 rounded-2xl sm:rounded-3xl text-[11px] sm:text-xs font-bold leading-relaxed shadow-sm ${m.role === 'user' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white text-slate-800 border border-slate-100 rounded-tl-none'}`}>
                   {m.imagePreview && (
                     <div className="mb-3 rounded-xl overflow-hidden border-2 border-white/20 shadow-inner">
-                      {m.imagePreview.startsWith('data:application/pdf') ? (
+                      {m.imagePreview === 'FILE_TEXT_PREVIEW' ? (
+                        <div className="w-full h-32 bg-slate-800 flex flex-col items-center justify-center gap-2">
+                          <FileSpreadsheet size={40} className="text-emerald-400/50" />
+                          <span className="text-[10px] text-emerald-400/50 font-black">EXCEL / CSV DOCUMENT</span>
+                        </div>
+                      ) : m.imagePreview.startsWith('data:application/pdf') ? (
                         <div className="w-full h-32 bg-slate-800 flex flex-col items-center justify-center gap-2">
                           <FileText size={40} className="text-white/50" />
                           <span className="text-[10px] text-white/50 font-black">PDF DOCUMENT</span>
@@ -383,16 +426,20 @@ export const AITakahashi: React.FC<AITakahashiProps> = ({ masterItems, onAddToCa
           </div>
 
           <div className="p-3 sm:p-4 border-t bg-white shrink-0 shadow-[0_-4px_20px_rgba(0,0,0,0.03)] space-y-3">
-            {selectedImage && (
+            {selectedFile && (
               <div className="relative w-16 h-16 rounded-lg overflow-hidden border-2 border-blue-100 shadow-md">
-                {selectedImage.file.type === 'application/pdf' ? (
+                {selectedFile.text ? (
+                  <div className="w-full h-full bg-slate-800 flex items-center justify-center">
+                    <FileSpreadsheet size={24} className="text-emerald-400/50" />
+                  </div>
+                ) : selectedFile.file.type === 'application/pdf' ? (
                   <div className="w-full h-full bg-slate-800 flex items-center justify-center">
                     <FileText size={24} className="text-white/50" />
                   </div>
                 ) : (
-                  <img src={`data:${selectedImage.file.type};base64,${selectedImage.base64}`} className="w-full h-full object-cover" />
+                  <img src={`data:${selectedFile.file.type};base64,${selectedFile.base64}`} className="w-full h-full object-cover" />
                 )}
-                <button onClick={() => setSelectedImage(null)} className="absolute top-0 right-0 bg-rose-500 text-white p-1 rounded-bl-md shadow-md">
+                <button onClick={() => setSelectedFile(null)} className="absolute top-0 right-0 bg-rose-500 text-white p-1 rounded-bl-md shadow-md">
                   <X size={10} />
                 </button>
               </div>
@@ -401,11 +448,11 @@ export const AITakahashi: React.FC<AITakahashiProps> = ({ masterItems, onAddToCa
               <button
                 onClick={() => fileInputRef.current?.click()}
                 className="p-3 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200"
-                title="写真を追加"
+                title="ファイルを追加"
               >
                 <Camera size={18} />
               </button>
-              <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept="image/*,application/pdf" />
+              <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept="image/*,application/pdf,.xlsx,.xls,.csv" />
 
               <div className="relative flex-1">
                 <input
