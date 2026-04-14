@@ -1204,8 +1204,9 @@ export const SlipManager: React.FC<{
         setIsSaving(true);
         try {
             const deliveredItems: SlipItem[] = []; const missingItems: SlipItem[] = [];
-            confirmingOutbound.items.forEach(item => {
-                const actual = actualQuantities[item.id] ?? item.quantity;
+            confirmingOutbound.items.forEach((item, idx) => {
+                const key = `${item.id}-${idx}`;
+                const actual = actualQuantities[key] ?? item.quantity;
                 const shortage = item.quantity - actual;
                 if (actual > 0) deliveredItems.push({ ...item, quantity: item.quantity, deliveredQuantity: actual, sourceSlipNo: confirmingOutbound.slipNumber });
                 if (shortage > 0) missingItems.push({ ...item, quantity: shortage, deliveredQuantity: 0 });
@@ -1487,12 +1488,13 @@ export const SlipManager: React.FC<{
                         <div className="p-6 overflow-y-auto space-y-4">
                             <table className="w-full text-sm">
                                 <thead><tr className="border-b text-slate-400 text-xs"><th className="text-left pb-2">品名 / 規格</th><th className="w-20 pb-2 text-center">受注数</th><th className="w-28 pb-2 text-center">出庫確定数</th></tr></thead>
-                                <tbody className="divide-y">{confirmingOutbound.items.map(i => {
-                                    const actual = actualQuantities[i.id] ?? i.quantity;
+                                <tbody className="divide-y">{confirmingOutbound.items.map((i, idx) => {
+                                    const key = `${i.id}-${idx}`;
+                                    const actual = actualQuantities[key] ?? i.quantity;
                                     const isOver = actual > i.quantity;
                                     const isNegative = actual < 0;
                                     return (
-                                        <tr key={i.id} className={isOver || isNegative ? 'bg-rose-50/30' : ''}>
+                                        <tr key={key} className={isOver || isNegative ? 'bg-rose-50/30' : ''}>
                                             <td className="py-3">
                                                 <div className="font-bold">{i.name}</div>
                                                 <div className="text-xs text-slate-600 font-bold font-mono tracking-tight">{i.model} {i.dimensions}</div>
@@ -1503,7 +1505,7 @@ export const SlipManager: React.FC<{
                                                     <input
                                                         type="number"
                                                         value={actual}
-                                                        onChange={e => setActualQuantities({ ...actualQuantities, [i.id]: parseInt(e.target.value) || 0 })}
+                                                        onChange={e => setActualQuantities({ ...actualQuantities, [key]: parseInt(e.target.value) || 0 })}
                                                         onWheel={e => (e.target as HTMLElement).blur()}
                                                         className={`w-full border-2 rounded-xl py-2 text-center font-black text-lg outline-none transition-all no-spin-buttons ${isOver || isNegative ? 'border-rose-500 bg-white text-rose-600' : 'border-slate-100 bg-slate-50 text-blue-600 focus:border-blue-400'}`}
                                                     />
@@ -2002,7 +2004,7 @@ export const SlipManager: React.FC<{
                                     <div className="flex gap-2 w-full md:w-auto">
                                         {activeTab === 'pending' ? (
                                             <>
-                                                <button onClick={() => { setConfirmingOutbound(s); setActualQuantities(s.items.reduce((a, v) => ({ ...a, [v.id]: v.quantity }), {} as Record<string, number>)); }} className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-700 text-white px-4 md:px-8 py-3 rounded-2xl text-[10px] md:text-[11px] font-black shadow-xl shadow-blue-100 active:scale-95 transition-all uppercase tracking-widest whitespace-nowrap">
+                                                <button onClick={() => { setConfirmingOutbound(s); setActualQuantities(s.items.reduce((a, v, idx) => ({ ...a, [`${v.id}-${idx}`]: v.quantity }), {} as Record<string, number>)); }} className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-700 text-white px-4 md:px-8 py-3 rounded-2xl text-[10px] md:text-[11px] font-black shadow-xl shadow-blue-100 active:scale-95 transition-all uppercase tracking-widest whitespace-nowrap">
                                                     <span className="md:hidden">実数入力</span><span className="hidden md:inline">実数確定して仮納品書発行</span>
                                                 </button>
                                                 <button onClick={() => { setPrintingSlips([s]); }} className="flex-1 md:flex-none bg-white border border-slate-200 px-4 md:px-6 py-3 rounded-2xl text-[10px] md:text-[11px] font-black hover:bg-slate-50 transition-all uppercase tracking-widest whitespace-nowrap">
