@@ -198,7 +198,12 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                     <div className="flex justify-between items-start shrink-0">
                         <div className="space-y-2">
                             <h2 className="text-2xl font-bold border-b-2 border-slate-800 pb-1 inline-block min-w-[300px]">{slip.customerName} 御中</h2>
-                            {!isGlobal && <div className="flex items-center gap-2 mt-2"><span className="bg-slate-800 text-white text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-widest">現場名</span><span className="text-xl font-bold text-slate-700 underline underline-offset-8 decoration-slate-300">{formatSiteName(slip.constructionName)}</span></div>}
+                            {!isGlobal && (
+                                <div className="flex flex-col gap-2 mt-2">
+                                    <div className="flex items-center gap-2"><span className="bg-slate-800 text-white text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-widest">現場名</span><span className="text-xl font-bold text-slate-700 underline underline-offset-8 decoration-slate-300">{formatSiteName(slip.constructionName)}</span></div>
+                                    {slip.customerOrderNumber && <div className="flex items-center gap-2"><span className="bg-slate-500 text-white text-[9px] px-2 py-0.5 rounded font-bold uppercase tracking-widest">注文番号</span><span className="text-base font-bold text-slate-600">No. {slip.customerOrderNumber}</span></div>}
+                                </div>
+                            )}
                         </div>
                         <div className="flex gap-4 items-start text-right text-[10px]">
                             <div>
@@ -253,7 +258,8 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                                                     type="number"
                                                     value={prevAmt}
                                                     onChange={(e) => onUpdateSlip?.({ previousBillingAmount: parseInt(e.target.value) || 0 })}
-                                                    className="w-full text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-1 print:hidden"
+                                                    onWheel={e => (e.target as HTMLElement).blur()}
+                                                    className="w-full text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-1 print:hidden no-spin-buttons"
                                                 />
                                                 <span className="hidden print:block">¥{prevAmt.toLocaleString()}</span>
                                             </td>
@@ -262,7 +268,8 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                                                     type="number"
                                                     value={payRec}
                                                     onChange={(e) => onUpdateSlip?.({ paymentReceived: parseInt(e.target.value) || 0 })}
-                                                    className="w-full text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-1 print:hidden"
+                                                    onWheel={e => (e.target as HTMLElement).blur()}
+                                                    className="w-full text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-1 print:hidden no-spin-buttons"
                                                 />
                                                 <span className="hidden print:block">¥{payRec.toLocaleString()}</span>
                                             </td>
@@ -372,7 +379,10 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                         <div className="flex items-center gap-2 mb-2"><span className="text-[9px] font-bold border border-slate-400 px-1 rounded bg-slate-50 uppercase">現場</span><span className="font-bold text-base">{formatSiteName(slip.constructionName)}</span></div>
                         <div className="text-[10px] space-y-1 text-slate-600 font-medium">
                             <p>【配送先】 {DestLabels[slip.deliveryDestination]} / {DeliveryTimeLabels[slip.deliveryTime]}</p>
-                            <p>【発注者】 {slip.orderingPerson || '未指定'} 様</p>
+                            <div className="flex gap-4">
+                                <p>【発注者】 {slip.orderingPerson || '未指定'} 様</p>
+                                {slip.customerOrderNumber && <p>【注文番号】 {slip.customerOrderNumber}</p>}
+                            </div>
                         </div>
                     </div>
                     <div className="w-[40%] text-right text-[10px]">
@@ -593,7 +603,10 @@ const CartItemRow = React.memo(({
                     style={provided.draggableProps.style}
                 >
                     <td className="w-8 text-center">
-                        <GripVertical size={16} className="text-slate-300 mx-auto" />
+                        <div className="flex flex-col items-center gap-1">
+                            <GripVertical size={16} className="text-slate-300 mx-auto" />
+                            <div className="text-[8px] font-mono text-slate-300 transform -rotate-90 origin-center translate-y-2">#{index + 1}</div>
+                        </div>
                     </td>
                     <td className="py-4">
                         <div className="flex flex-col gap-1.5">
@@ -676,7 +689,8 @@ const CartItemRow = React.memo(({
                                     const val = parseInt(e.target.value) || 0;
                                     onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, quantity: val } : pi));
                                 }}
-                                className={`w-full py-2 border rounded-xl text-center font-black bg-slate-50 outline-none ${isExceeding ? 'border-rose-500 text-rose-600 animate-pulse' : 'focus:border-blue-400'}`}
+                                onWheel={e => (e.target as HTMLElement).blur()}
+                                className={`w-full py-2 border rounded-xl text-center font-black bg-slate-50 outline-none no-spin-buttons ${isExceeding ? 'border-rose-500 text-rose-600 animate-pulse' : 'focus:border-blue-400'}`}
                             />
                             {isExceeding && (
                                 <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-rose-600 text-white text-[8px] px-2 py-1 rounded whitespace-nowrap shadow-lg z-50">
@@ -687,11 +701,16 @@ const CartItemRow = React.memo(({
                     </td>
                     <td className="text-center">
                         <div className="flex flex-col items-center gap-1">
+                            <div className="flex flex-col items-center -space-y-0.5 mb-1 text-[9px] font-black tracking-tighter">
+                                <div className="text-slate-400">標準: ¥{(item.sellingPrice || 0).toLocaleString()}</div>
+                                {item.listPrice > 0 && <div className="text-slate-300">定価: ¥{item.listPrice.toLocaleString()}</div>}
+                            </div>
                             <input
                                 type="number"
                                 value={item.appliedPrice || 0}
                                 onChange={e => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, appliedPrice: parseInt(e.target.value) || 0 } : pi))}
-                                className="w-full py-2 border rounded-xl text-center font-black bg-slate-50 outline-none text-emerald-600"
+                                onWheel={e => (e.target as HTMLElement).blur()}
+                                className="w-full py-2 border rounded-xl text-center font-black bg-slate-50 outline-none text-emerald-600 focus:ring-2 focus:ring-emerald-500 no-spin-buttons"
                             />
                             <div className="flex items-center gap-1 mt-1">
                                 <button 
@@ -813,6 +832,7 @@ export const SlipManager: React.FC<{
     const [customerName, setCustomerName] = useState<string>(defaultCustomer || '');
     const [siteName, setSiteName] = useState('');
     const [orderingPerson, setOrderingPerson] = useState('');
+    const [customerOrderNumber, setCustomerOrderNumber] = useState('');
     const [receivingPerson, setReceivingPerson] = useState('');
     const [slipDate, setSlipDate] = useState(new Date().toISOString().slice(0, 10));
     const [orderDate, setOrderDate] = useState(new Date().toISOString().slice(0, 10));
@@ -821,6 +841,7 @@ export const SlipManager: React.FC<{
     const [note, setNote] = useState('');
 
     const [showSuggestions, setShowSuggestions] = useState(false);
+    const [showSiteSuggestions, setShowSiteSuggestions] = useState(false);
     const [itemSearchQuery, setItemSearchQuery] = useState('');
     const [showItemSuggestions, setShowItemSuggestions] = useState(false);
     const [isScanning, setIsScanning] = useState(false);
@@ -839,6 +860,29 @@ export const SlipManager: React.FC<{
         const unsubscribe = storage.subscribeToSlips(setSlips);
         return () => { if (unsubscribe && typeof unsubscribe === 'function') (unsubscribe as any)(); };
     }, []);
+
+    // 顧客・現場が変更された際にカート内の単価を自動再計算する
+    useEffect(() => {
+        if (cart.length === 0) return;
+        
+        const nextCart = cart.map(item => {
+            // マスターに存在する資材のみ再計算対象とする（自由入力行は除外）
+            const master = masterItems.find(mi => mi.id === item.id);
+            if (!master) return item;
+            
+            const newPrice = getAppliedPrice(master, customerName, siteName, pricingRules);
+            if (newPrice !== item.appliedPrice) {
+                return { ...item, appliedPrice: newPrice };
+            }
+            return item;
+        });
+
+        // 差分がある場合のみ更新を実行
+        const isChanged = nextCart.some((it, idx) => it.appliedPrice !== cart[idx].appliedPrice);
+        if (isChanged) {
+            onUpdateCart(nextCart);
+        }
+    }, [customerName, siteName, pricingRules, masterItems, onUpdateCart]); // cart.lengthの変化も含むために、cartは依存に含めず、内容比較で制御
 
     const { pendingOutbounds, archivedSlips, reslips } = useMemo(() => {
         const pending: Slip[] = []; const archived: Slip[] = []; const res: Slip[] = [];
@@ -877,6 +921,25 @@ export const SlipManager: React.FC<{
             setIsAnalyzingReturn(false);
         }
     };
+
+
+
+    const existingSiteNames = useMemo(() => {
+        if (!customerName) return [];
+        const sites = new Set<string>();
+        pricingRules.forEach(r => {
+            if (r.customerName === customerName && r.siteName) {
+                sites.add(r.siteName);
+            }
+        });
+        return Array.from(sites).sort();
+    }, [customerName, pricingRules]);
+
+    const filteredSiteSuggestions = useMemo(() => {
+        if (!siteName.trim()) return existingSiteNames;
+        const q = siteName.toLowerCase();
+        return existingSiteNames.filter(s => s.toLowerCase().includes(q));
+    }, [siteName, existingSiteNames]);
 
     const handleApplyAIResults = (confirmedItems: any[]) => {
         const newCartItems = confirmedItems.filter(ci => ci.selectedItem).map(item => ({
@@ -1090,7 +1153,7 @@ export const SlipManager: React.FC<{
                 const updateData: Partial<Slip> = {
                     date: slipDate, orderDate, customerName, constructionName: siteName, items: processedItems,
                     totalAmount: total, taxAmount: Math.round(total * 0.1), grandTotal: Math.round(total * 1.1),
-                    note, deliveryTime: time, deliveryDestination: dest, orderingPerson, receivingPerson
+                    note, deliveryTime: time, deliveryDestination: dest, orderingPerson, customerOrderNumber, receivingPerson
                 };
                 try {
                     await storage.updateSlip(editingSlipId, updateData);
@@ -1108,7 +1171,7 @@ export const SlipManager: React.FC<{
                     createdAt: Date.now(), date: slipDate, orderDate, customerName, constructionName: siteName, items: processedItems.map(i => ({ ...i, sourceSlipNo: sNo })),
                     totalAmount: total, taxAmount: Math.round(total * 0.1), grandTotal: Math.round(total * 1.1),
                     note, deliveryTime: time, deliveryDestination: dest, groupId: gid, slipNumber: sNo,
-                    orderingPerson, receivingPerson, type: activeMode === 'return' ? 'return' : 'outbound', isClosed: activeMode === 'return'
+                    orderingPerson, customerOrderNumber, receivingPerson, type: activeMode === 'return' ? 'return' : 'outbound', isClosed: activeMode === 'return'
                 };
                 await storage.addSlip(cleanForFirestore(newSlip));
                 // 新規保存時は自動的にピッキング用伝票を表示（金額表示なし）
@@ -1328,6 +1391,7 @@ export const SlipManager: React.FC<{
         setCustomerName(s.customerName);
         setSiteName(s.constructionName || '');
         setOrderingPerson(s.orderingPerson || '');
+        setCustomerOrderNumber(s.customerOrderNumber || '');
         setReceivingPerson(s.receivingPerson || '');
         setSlipDate(s.date);
         setOrderDate(s.orderDate || s.date);
@@ -1440,6 +1504,7 @@ export const SlipManager: React.FC<{
                                                         type="number"
                                                         value={actual}
                                                         onChange={e => setActualQuantities({ ...actualQuantities, [i.id]: parseInt(e.target.value) || 0 })}
+                                                        onWheel={e => (e.target as HTMLElement).blur()}
                                                         className={`w-full border-2 rounded-xl py-2 text-center font-black text-lg outline-none transition-all no-spin-buttons ${isOver || isNegative ? 'border-rose-500 bg-white text-rose-600' : 'border-slate-100 bg-slate-50 text-blue-600 focus:border-blue-400'}`}
                                                     />
                                                     {isOver && <span className="text-[9px] text-rose-500 font-black mt-1">受注数を超過！</span>}
@@ -1621,28 +1686,48 @@ export const SlipManager: React.FC<{
                                 <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm space-y-6">
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="relative"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">顧客名 <span className="text-rose-500">*</span></label><input value={customerName} onChange={e => { setCustomerName(e.target.value); setShowSuggestions(true); }} className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold focus:ring-2 focus:ring-blue-500" placeholder="顧客を検索" />{showSuggestions && filteredSuggestions.length > 0 && (<div className="absolute z-10 w-full bg-white border shadow-lg rounded-2xl mt-1 overflow-hidden">{filteredSuggestions.map(c => <div key={c.id} onClick={() => { setCustomerName(c.name); setShowSuggestions(false); }} className="p-4 hover:bg-blue-50 cursor-pointer text-sm font-bold border-b last:border-0">{c.name}</div>)}</div>)}</div>
-                                        <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">現場名</label><input value={siteName} onChange={e => setSiteName(e.target.value)} className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold focus:ring-2 focus:ring-blue-500" placeholder="一般・共通" /></div>
+                                        <div className="relative">
+                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">現場名</label>
+                                            <input 
+                                                value={siteName} 
+                                                onChange={e => { setSiteName(e.target.value); setShowSiteSuggestions(true); }} 
+                                                onFocus={() => setShowSiteSuggestions(true)}
+                                                className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold focus:ring-2 focus:ring-blue-500" 
+                                                placeholder="一般・共通" 
+                                            />
+                                            {showSiteSuggestions && filteredSiteSuggestions.length > 0 && (
+                                                <div className="absolute z-10 w-full bg-white border shadow-lg rounded-2xl mt-1 overflow-hidden">
+                                                    {filteredSiteSuggestions.map(s => (
+                                                        <div 
+                                                            key={s} 
+                                                            onClick={() => { setSiteName(s); setShowSiteSuggestions(false); }} 
+                                                            className="p-4 hover:bg-blue-50 cursor-pointer text-sm font-bold border-b last:border-0"
+                                                        >
+                                                            {s}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                     <div className="grid grid-cols-2 gap-4">
                                         <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">発注者</label><input value={orderingPerson} onChange={e => setOrderingPerson(e.target.value)} placeholder="発注者名" className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold" /></div>
+                                        <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">注文番号</label><input value={customerOrderNumber} onChange={e => setCustomerOrderNumber(e.target.value)} placeholder="注文番号" className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold" /></div>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
                                         <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">受付担当 <span className="text-rose-500">*</span></label><input value={receivingPerson} onChange={e => setReceivingPerson(e.target.value)} placeholder="担当者名" className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold" /></div>
+                                        <div>
+                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">備考</label>
+                                            <input value={note} onChange={e => setNote(e.target.value)} placeholder="指示事項・備考などの入力..." className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold outline-none focus:ring-2 focus:ring-blue-500" />
+                                        </div>
                                     </div>
                                     <div className="grid grid-cols-2 gap-4">
                                         <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">配送先指定</label><select value={dest} onChange={e => setDest(e.target.value as any)} className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold outline-none focus:ring-2 focus:ring-blue-500">{Object.entries(DestLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
                                         <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">希望配送時間</label><select value={time} onChange={e => setTime(e.target.value as any)} className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold outline-none focus:ring-2 focus:ring-blue-500">{Object.entries(DeliveryTimeLabels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
                                     </div>
-                                    <div className="grid grid-cols-3 gap-4">
+                                    <div className="grid grid-cols-2 gap-4">
                                         <div className="relative"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">受注日</label><input type="date" value={orderDate} onChange={e => setOrderDate(e.target.value)} className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" /></div>
                                         <div className="relative"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">出庫日</label><input type="date" value={slipDate} onChange={e => setSlipDate(e.target.value)} className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" /></div>
-                                        <div>
-                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">備考</label>
-                                            <textarea 
-                                                value={note} 
-                                                onChange={e => setNote(e.target.value)} 
-                                                placeholder="指示事項・備考などの入力..."
-                                                className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold outline-none focus:ring-2 focus:ring-blue-500 min-h-[46px] h-[46px] resize-none"
-                                            />
-                                        </div>
                                     </div>
                                     <div className="border-t pt-6">
                                         <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 grow flex flex-col min-h-0">
@@ -1695,7 +1780,10 @@ export const SlipManager: React.FC<{
                                                                                     <span className="font-extrabold text-sm truncate group-hover:text-blue-700 transition-colors">{i.name}</span>
                                                                                     <div className="flex items-center gap-2 shrink-0">
                                                                                         {i.historyMonth && <span className="text-[9px] bg-rose-50 text-rose-600 px-2 py-0.5 rounded font-black">{i.historyMonth} 納品</span>}
-                                                                                        <span className="text-sm font-black text-blue-700">¥{(i.appliedPrice || 0).toLocaleString()}</span>
+                                                                                        <div className="flex flex-col items-end">
+                                                                                            <span className="text-sm font-black text-blue-700">¥{(i.appliedPrice || 0).toLocaleString()}</span>
+                                                                                            <span className="text-[9px] font-bold text-slate-400">標準: ¥{(i.sellingPrice || 0).toLocaleString()}</span>
+                                                                                        </div>
                                                                                     </div>
                                                                                 </div>
                                                                                 <div className="flex justify-between items-center">
@@ -1745,7 +1833,7 @@ export const SlipManager: React.FC<{
                                                 )}
                                             </div>
                                             <table className="w-full text-sm">
-                                                <thead><tr className="text-slate-400 text-[10px] uppercase font-black tracking-widest border-b pb-2"><th className="w-8"></th><th className="pb-2 text-left">品名 / 明細</th><th className="w-24 text-center pb-2">数量</th><th className="w-28 text-center pb-2">単価(¥)</th><th className="w-12"></th></tr></thead>
+                                                <thead><tr className="text-slate-400 text-[10px] uppercase font-black tracking-widest border-b pb-2"><th className="w-8"></th><th className="pb-2 text-left">品名 / 明細</th><th className="w-24 text-center pb-2">数量</th><th className="w-32 text-center pb-2">適用単価 / 標準価格</th><th className="w-12"></th></tr></thead>
                                                 <DragDropContext onDragEnd={handleDragEnd}>
                                                     <Droppable droppableId="cart-items">
                                                         {(provided) => (

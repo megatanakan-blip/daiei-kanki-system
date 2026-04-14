@@ -27,6 +27,8 @@ export const PricingManager = ({ rules, customers, items, onClose }: PricingMana
     const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set<string>());
     const [modelFilterQuery, setModelFilterQuery] = useState('');
     const [isSaving, setIsSaving] = useState(false);
+    const [editingSite, setEditingSite] = useState<string | null>(null);
+    const [siteRenameInput, setSiteRenameInput] = useState('');
 
     const allCategoriesInMaster = useMemo(() => {
         const cats = new Set<string>();
@@ -163,6 +165,34 @@ export const PricingManager = ({ rules, customers, items, onClose }: PricingMana
         }
     };
 
+    const handleUpdateSiteName = async (oldName: string) => {
+        const nextName = siteRenameInput.trim();
+        if (!nextName || nextName === oldName) {
+            setEditingSite(null);
+            return;
+        }
+
+        setIsSaving(true);
+        try {
+            // 現在の表示対象顧客の、対象現場名のルールをすべて抽出
+            const rulesToUpdate = rules.filter(r => 
+                targetCustomers.some(c => c.name === r.customerName) && 
+                (r.siteName === (oldName === 'BASE_COMMON' ? '' : oldName))
+            );
+
+            await Promise.all(rulesToUpdate.map(r => 
+                storage.updatePricingRule(r.id, { siteName: nextName })
+            ));
+
+            setEditingSite(null);
+            setSiteRenameInput('');
+        } catch (err) {
+            alert('現場名の更新に失敗しました');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
     const [editingCustomer, setEditingCustomer] = useState<string | null>(null);
     const [editName, setEditName] = useState('');
     const [editEmail, setEditEmail] = useState('');
@@ -287,9 +317,43 @@ export const PricingManager = ({ rules, customers, items, onClose }: PricingMana
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             {Object.entries(groupedRulesBySite).length > 0 ? (
                                 Object.entries(groupedRulesBySite).map(([site, cats]) => (
-                                    <div key={site} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
-                                        <div className="bg-slate-50 p-3 text-xs font-bold border-b flex items-center gap-2 text-slate-600">
-                                            <MapPin size={14} className="text-blue-500" /> {site === 'BASE_COMMON' ? '共通設定 (現場指定なし)' : site}
+                                    <div key={site} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col group">
+                                        <div className="bg-slate-50 p-3 text-xs font-bold border-b flex items-center justify-between text-slate-600">
+                                            <div className="flex items-center gap-2">
+                                                <MapPin size={14} className="text-blue-500" />
+                                                {editingSite === site ? (
+                                                    <input
+                                                        autoFocus
+                                                        value={siteRenameInput}
+                                                        onChange={e => setSiteRenameInput(e.target.value)}
+                                                        className="px-2 py-1 border rounded bg-white text-xs font-bold outline-none focus:ring-2 focus:ring-blue-400"
+                                                        onKeyDown={e => {
+                                                            if (e.key === 'Enter') handleUpdateSiteName(site);
+                                                            if (e.key === 'Escape') setEditingSite(null);
+                                                        }}
+                                                    />
+                                                ) : (
+                                                    <span>{site === 'BASE_COMMON' ? '共通設定 (現場指定なし)' : site}</span>
+                                                )}
+                                            </div>
+                                            <div className="flex items-center gap-1">
+                                                {editingSite === site ? (
+                                                    <>
+                                                        <button onClick={() => handleUpdateSiteName(site)} className="p-1 hover:bg-emerald-100 rounded text-emerald-600"><Save size={14} /></button>
+                                                        <button onClick={() => setEditingSite(null)} className="p-1 hover:bg-slate-200 rounded text-slate-400"><X size={14} /></button>
+                                                    </>
+                                                ) : site !== 'BASE_COMMON' && (
+                                                    <button 
+                                                        onClick={() => {
+                                                            setEditingSite(site);
+                                                            setSiteRenameInput(site);
+                                                        }}
+                                                        className="p-1 hover:bg-slate-200 rounded text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                    >
+                                                        <Edit3 size={14} />
+                                                    </button>
+                                                )}
+                                            </div>
                                         </div>
                                         <div className="p-3 space-y-2 max-h-[300px] overflow-y-auto">
                                             {Object.entries(cats).map(([cat, rs]) => rs.map(r => (

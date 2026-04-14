@@ -152,6 +152,10 @@ export const addPricingRule = async (r: Omit<PricingRule, 'id'>) => {
     const docRef = await addDoc(collection(db, COLLECTIONS.RULES), { ...r, updatedAt: Date.now() });
     return docRef.id;
 };
+export const updatePricingRule = async (id: string, r: Partial<PricingRule>) => {
+    const docRef = doc(db, COLLECTIONS.RULES, id);
+    await updateDoc(docRef, { ...r, updatedAt: Date.now() });
+};
 export const deletePricingRule = (id: string) => deleteDoc(doc(db, COLLECTIONS.RULES, id));
 
 export const addSlip = async (s: Omit<Slip, 'id'>) => {

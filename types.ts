@@ -122,6 +122,7 @@ export interface Slip {
   isClosed?: boolean;
   siteSummaries?: { name: string; total: number }[];
   orderingPerson?: string;
+  customerOrderNumber?: string; // 注文番号
   receivingPerson?: string;
   issuerPerson?: string;
   deliveryPerson?: string;
