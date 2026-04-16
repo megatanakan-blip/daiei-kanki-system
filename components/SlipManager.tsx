@@ -867,7 +867,8 @@ export const SlipManager: React.FC<{
         
         const nextCart = cart.map(item => {
             // マスターに存在する資材のみ再計算対象とする（自由入力行は除外）
-            const master = masterItems.find(mi => mi.id === item.id);
+            const realId = item.id.includes('__') ? item.id.split('__')[0] : item.id;
+            const master = masterItems.find(mi => mi.id === realId);
             if (!master) return item;
             
             const newPrice = getAppliedPrice(master, customerName, siteName, pricingRules);
@@ -946,7 +947,7 @@ export const SlipManager: React.FC<{
             ...item.selectedItem,
             quantity: -Math.abs(item.quantity),
             deliveredQuantity: 0,
-            id: generateId(),
+            id: `${item.selectedItem.id}__${generateId()}`,
             historyMonth: item.selectedItem.date,
             availableQuantity: item.selectedItem.maxAvailable,
             updatedAt: Date.now()
@@ -1029,7 +1030,7 @@ export const SlipManager: React.FC<{
             ? { ...item, quantity: -1, deliveredQuantity: 0, appliedPrice: price }
             : { ...item, quantity: 1, appliedPrice: price, deliveredQuantity: 1 };
         
-        onUpdateCart(prev => [...prev, itemToAdd]);
+        onUpdateCart(prev => [...prev, { ...itemToAdd, id: `${item.id}__${generateId()}` }]);
         setItemSearchQuery(''); setShowItemSuggestions(false);
         setSelectedSuggestions(new Map());
     };
@@ -1053,7 +1054,7 @@ export const SlipManager: React.FC<{
                 ? { ...item, quantity: -1, deliveredQuantity: 0, appliedPrice: price }
                 : { ...item, quantity: 1, appliedPrice: price, deliveredQuantity: 1 };
         });
-        onUpdateCart(prev => [...prev, ...itemsToAdd]);
+        onUpdateCart(prev => [...prev, ...itemsToAdd.map(it => ({ ...it, id: `${it.id}__${generateId()}` }))]);
         setItemSearchQuery(''); setShowItemSuggestions(false);
         setSelectedSuggestions(new Map());
     };
@@ -1113,7 +1114,7 @@ export const SlipManager: React.FC<{
             await storage.addMaterial(materialData);
             alert('資材マスターに登録しました。');
             // IDを更新して、再登録を防ぐ
-            onUpdateCart(prev => prev.map(i => i.id === item.id ? { ...i, id: 'registered-' + Date.now() } : i));
+            onUpdateCart(prev => prev.map(i => i.id === item.id ? { ...i, id: 'registered-' + Date.now() + '__' + generateId() } : i));
         }
     }, [onUpdateCart]);
 
@@ -1126,10 +1127,9 @@ export const SlipManager: React.FC<{
         setIsSaving(true);
         try {
             const processedItems = cart.map((i: SlipItem) => {
-                // Ensure returns stay negative only if they are not intentionally positive (like fees)
-                // Use i.quantity as-is to allow user flexibility in post-edit scenarios
                 const qty = i.quantity;
-                return { ...i, quantity: qty, deliveredQuantity: qty, date: slipDate };
+                const realId = i.id.includes('__') ? i.id.split('__')[0] : i.id;
+                return { ...i, id: realId, quantity: qty, deliveredQuantity: qty, date: slipDate };
             });
 
             // 返品モード時の過剰数量チェック
@@ -1173,9 +1173,9 @@ export const SlipManager: React.FC<{
                     note, deliveryTime: time, deliveryDestination: dest, groupId: gid, slipNumber: sNo,
                     orderingPerson, customerOrderNumber, receivingPerson, type: activeMode === 'return' ? 'return' : 'outbound', isClosed: activeMode === 'return'
                 };
-                await storage.addSlip(cleanForFirestore(newSlip));
+                const newId = await storage.addSlip(cleanForFirestore(newSlip));
                 // 新規保存時は自動的にピッキング用伝票を表示（金額表示なし）
-                setPrintingSlips([{ ...newSlip, id: generateId() } as Slip]);
+                setPrintingSlips([{ ...newSlip, id: newId } as Slip]);
                 onClearCart();
                 handleTabChange(activeMode === 'return' ? 'history' : 'pending');
             }
@@ -1399,7 +1399,7 @@ export const SlipManager: React.FC<{
         setTime(s.deliveryTime);
         setDest(s.deliveryDestination);
         setNote(s.note || '');
-        onUpdateCart(s.items);
+        onUpdateCart(s.items.map(item => ({ ...item, id: `${item.id}__${generateId()}` })));
         handleTabChange('create');
     };
 

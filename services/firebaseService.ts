@@ -159,12 +159,14 @@ export const updatePricingRule = async (id: string, r: Partial<PricingRule>) => 
 export const deletePricingRule = (id: string) => deleteDoc(doc(db, COLLECTIONS.RULES, id));
 
 export const addSlip = async (s: Omit<Slip, 'id'>) => {
-    const docRef = await addDoc(collection(db, COLLECTIONS.SLIPS), { ...s, updatedAt: Date.now() });
+    const data = sanitizeData(s);
+    const docRef = await addDoc(collection(db, COLLECTIONS.SLIPS), { ...data, updatedAt: Date.now() });
     return docRef.id;
 };
 export const updateSlip = async (id: string, data: Partial<Slip>) => {
+    const sanitizedData = removeUndefined(data);
     const docRef = doc(db, COLLECTIONS.SLIPS, id);
-    await updateDoc(docRef, { ...data, updatedAt: Date.now() });
+    await updateDoc(docRef, { ...sanitizedData, updatedAt: Date.now() });
 };
 export const deleteSlip = (id: string) => deleteDoc(doc(db, COLLECTIONS.SLIPS, id));
 

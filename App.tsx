@@ -17,6 +17,7 @@ import { LinkUserManagement } from './components/LinkUserManagement';
 import { generateMaterialsFromFile } from './services/geminiService';
 import * as storage from './services/firebaseService';
 import { normalizeForSearch, filterAndSortItems, getAppliedPrice } from './services/searchUtils';
+import * as XLSX from 'xlsx';
 
 const App: React.FC = () => {
     const [items, setItems] = useState<MaterialItem[]>([]);
@@ -57,6 +58,7 @@ const App: React.FC = () => {
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set<string>());
 
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const restoreInputRef = useRef<HTMLInputElement>(null);
 
     const pendingOutboundsCount = useMemo(() =>
         slips.filter(s => s.type === 'outbound' && !s.isClosed).length,
@@ -158,6 +160,63 @@ const App: React.FC = () => {
             downloadAnchorNode.click();
             downloadAnchorNode.remove();
         } catch (err) { alert("保存に失敗しました。"); }
+    };
+
+    const handleLocalRestore = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        try {
+            const reader = new FileReader();
+            reader.onload = async (re) => {
+                try {
+                    const json = JSON.parse(re.target?.result as string);
+                    if (!Array.isArray(json)) {
+                        alert("無効なバックアップファイル形式です。");
+                        return;
+                    }
+                    if (window.confirm(`${json.length}件の資材データを復元（追加）しますか？`)) {
+                        setLoadingAI(true);
+                        await storage.importMaterials(json);
+                        alert("復元が完了しました。");
+                    }
+                } catch (e) {
+                    alert("ファイルの解析に失敗しました。JSON形式であることを確認してください。");
+                }
+            };
+            reader.readAsText(file);
+        } catch (err) {
+            alert("読み込み中にエラーが発生しました。");
+        } finally {
+            if (restoreInputRef.current) restoreInputRef.current.value = '';
+            setLoadingAI(false);
+        }
+    };
+
+    const handleExcelExport = (format: 'xlsx' | 'csv') => {
+        try {
+            const exportData = items.map(item => ({
+                'カテゴリー': item.category,
+                '品名': item.name,
+                '型式・仕様': item.model,
+                '寸法・サイズ': item.dimensions,
+                '定価': item.listPrice,
+                '標準売価': item.sellingPrice,
+                '仕入原価': item.costPrice,
+                '単位': item.unit,
+                '備考': item.notes || '',
+                '最終更新日時': item.updatedAt ? new Date(item.updatedAt).toLocaleString() : ''
+            }));
+
+            const worksheet = XLSX.utils.json_to_sheet(exportData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "MaterialMaster");
+            
+            const fileName = `MaterialMaster_${new Date().toISOString().slice(0, 10)}.${format}`;
+            XLSX.writeFile(workbook, fileName);
+        } catch (err) {
+            alert(`${format.toUpperCase()}の書き出しに失敗しました。`);
+        }
     };
 
     const handleBulkDelete = async (ids: string[]) => {
@@ -477,7 +536,11 @@ const App: React.FC = () => {
                             />
                         </div>
                         <div className="p-4 bg-slate-50 border-t flex justify-start gap-4 px-10">
-                            <button onClick={handleLocalExport} className="flex items-center gap-2 text-slate-500 hover:text-indigo-600 text-[10px] font-black uppercase transition-all"><Save size={14} /> DBバックアップ</button>
+                            <button onClick={handleLocalExport} className="flex items-center gap-2 text-slate-500 hover:text-indigo-600 text-[10px] font-black uppercase transition-all"><Database size={14} /> JSONバックアップ</button>
+                            <input type="file" ref={restoreInputRef} onChange={handleLocalRestore} className="hidden" accept=".json" />
+                            <button onClick={() => restoreInputRef.current?.click()} className="flex items-center gap-2 text-slate-500 hover:text-orange-600 text-[10px] font-black uppercase transition-all"><RotateCcw size={14} /> JSONから復元</button>
+                            <button onClick={() => handleExcelExport('xlsx')} className="flex items-center gap-2 text-slate-500 hover:text-emerald-600 text-[10px] font-black uppercase transition-all"><FileText size={14} /> MASTER EXCEL出力</button>
+                            <button onClick={() => handleExcelExport('csv')} className="flex items-center gap-2 text-slate-500 hover:text-emerald-600 text-[10px] font-black uppercase transition-all"><FileText size={14} /> MASTER CSV出力</button>
                         </div>
                     </div>
                 </div>
