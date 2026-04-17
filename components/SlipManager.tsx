@@ -585,6 +585,15 @@ const CartItemRow = React.memo(({
 }) => {
     const isReturn = activeMode === 'return';
     const [isNoteOpen, setIsNoteOpen] = useState(!!item.slipItemNote);
+    const [localQty, setLocalQty] = useState(item.quantity.toString());
+
+    // 外部（親）からの数量変更を同期
+    useEffect(() => {
+        if (parseInt(localQty) !== item.quantity && localQty !== '-') {
+            setLocalQty(item.quantity.toString());
+        }
+    }, [item.quantity]);
+
     const historyInfo = (item as any).historyMonth ? {
         month: (item as any).historyMonth,
         available: (item as any).availableQuantity
@@ -683,12 +692,23 @@ const CartItemRow = React.memo(({
                     <td className="text-center">
                         <div className="relative">
                             <input
-                                type="number"
-                                value={item.quantity}
+                                type="text" // 数字以外の一時的な入力を許可
+                                inputMode="numeric"
+                                value={localQty}
                                 onChange={e => {
-                                    const val = parseInt(e.target.value) || 0;
-                                    onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, quantity: val } : pi));
+                                    const val = e.target.value;
+                                    // 空文字、マイナスのみ、または正規の数値を許可
+                                    if (val === '' || val === '-' || /^-?\d*$/.test(val)) {
+                                        setLocalQty(val);
+                                        const n = parseInt(val);
+                                        if (!isNaN(n)) {
+                                            onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, quantity: n } : pi));
+                                        } else if (val === '') {
+                                            onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, quantity: 0 } : pi));
+                                        }
+                                    }
                                 }}
+
                                 onWheel={e => (e.target as HTMLElement).blur()}
                                 className={`w-full py-2 border rounded-xl text-center font-black bg-slate-50 outline-none no-spin-buttons ${isExceeding ? 'border-rose-500 text-rose-600 animate-pulse' : 'focus:border-blue-400'}`}
                             />
@@ -1941,9 +1961,16 @@ export const SlipManager: React.FC<{
                                                                 <div key={sl.id} className="p-4 hover:bg-slate-50 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                                                                     <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6 flex-grow">
                                                                         <div className="font-mono text-slate-400 text-xs sm:w-28 shrink-0">{sl.date}</div>
-                                                                        <div className="flex items-center gap-2">
-                                                                            <span className="font-black text-sm whitespace-nowrap">{getSlipLabel(sl.type)}</span>
-                                                                            <span className="text-[9px] text-slate-400 font-mono bg-slate-100 px-1.5 py-0.5 rounded shrink-0">No.{sl.slipNumber || 'UNK'}</span>
+                                                                        <div className="flex flex-col gap-0.5">
+                                                                            <div className="flex items-center gap-2">
+                                                                                <span className="font-black text-sm whitespace-nowrap">{getSlipLabel(sl.type)}</span>
+                                                                                <span className="text-[9px] text-slate-400 font-mono bg-slate-100 px-1.5 py-0.5 rounded shrink-0">No.{sl.slipNumber || 'UNK'}</span>
+                                                                            </div>
+                                                                            {sl.items?.[0] && (
+                                                                                <div className="text-[10px] text-slate-500 font-bold truncate max-w-[200px]">
+                                                                                    {sl.items[0].name} {sl.items.length > 1 ? ` 他 ${sl.items.length - 1}点` : ''}
+                                                                                </div>
+                                                                            )}
                                                                         </div>
                                                                         <div className="sm:hidden border-t border-slate-100 my-1"></div>
                                                                         <div className="font-mono font-black text-slate-900 sm:w-32 sm:text-right">
@@ -1992,6 +2019,14 @@ export const SlipManager: React.FC<{
                                                 {s.customerName} <span className="text-xs text-slate-400 font-bold tracking-tight inline-block">({formatSiteName(s.constructionName)})</span>
                                                 {s.source === 'link' && <span className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-[9px] px-2 py-0.5 rounded-full font-black animate-pulse shadow-sm">LINK注文</span>}
                                             </div>
+                                            {s.items?.[0] && (
+                                                <div className="flex items-center gap-1.5 mt-1.5">
+                                                    <div className="px-2 py-0.5 bg-blue-50 text-[10px] font-black text-blue-700 rounded-lg border border-blue-100 flex items-center gap-1.5 shadow-sm">
+                                                        <Package size={12} className="text-blue-400" />
+                                                        {s.items[0].name} {s.items.length > 1 ? ` 外 ${s.items.length - 1}点` : ''}
+                                                    </div>
+                                                </div>
+                                            )}
                                             <div className="text-[10px] text-slate-400 font-mono mt-1 font-bold uppercase tracking-widest flex items-center gap-2">
                                                 <span>{new Date(s.createdAt).toLocaleString()}</span>
                                                 <span className="hidden md:inline text-slate-300 mx-2">|</span>
