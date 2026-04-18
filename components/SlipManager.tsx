@@ -154,37 +154,57 @@ const DestLabels: Record<DeliveryDestination, string> = {
     site: '現場', factory: '工場', office: '事務所', home: 'ご自宅', bring: 'ご持参', carrier: '運送便', none: '未指定'
 };
 
-const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settings, onUpdateSlip }: {
-    slip: Slip,
-    pageNum?: number,
-    totalPages?: number,
-    forceDisplayPrice?: boolean,
-    settings: AppSettings | null,
-    onUpdateSlip?: (updates: Partial<Slip>) => void
-}) => {
+const SlipPage: React.FC<{
+    slip: Slip;
+    pageNum?: number;
+    totalPages?: number;
+    forceDisplayPrice?: boolean;
+    settings: AppSettings | null;
+    pricingRules?: PricingRule[];
+    onUpdateSlip?: (updates: Partial<Slip>) => void;
+}> = ({ slip, pageNum = 1, totalPages = 1, forceDisplayPrice = false, settings, pricingRules = [], onUpdateSlip }) => {
     const info = settings || DEFAULT_COMPANY_INFO;
     const isReturn = slip.type === 'return' || (slip.items && slip.items.some(i => (i.deliveredQuantity ?? i.quantity) < 0));
     const isCover = slip.type === 'cover';
+
+    const isGlobal = slip.constructionName === '全現場一括集計';
+    const isProvisional = slip.type === 'provisional';
+    const isDelivery = slip.type === 'delivery';
+    const isWorkSlip = slip.type === 'outbound';
+    const isInvoice = slip.type === 'invoice';
+    const isDetail = isInvoice || isDelivery;
+
+    // 最新の単価設定を考慮して、表示用の合計金額を（必要であれば）再計算
+    const currentSlipTotal = useMemo(() => {
+        if (!slip.items || slip.items.length === 0) return slip.totalAmount || 0;
+        // 請求書・納品書、または保存された合計が 0 の場合は再計算を優先
+        if (isInvoice || isDelivery || forceDisplayPrice || (slip.totalAmount || 0) === 0) {
+            return slip.items.reduce((acc, item) => {
+                let price = item.appliedPrice || 0;
+                if (pricingRules && pricingRules.length > 0 && !item.slipItemNote && !item.name.includes('※特値')) {
+                    const latest = getAppliedPrice(item, slip.customerName || null, slip.constructionName || null, pricingRules);
+                    // 再計算結果が0の場合は保存済みの値を優先（マスター未設定の商品を保護）
+                    if (latest > 0 && (price === 0 || isInvoice || isDelivery || forceDisplayPrice)) price = latest;
+                }
+                return acc + (price * (item.deliveredQuantity ?? item.quantity));
+            }, 0);
+        }
+        return slip.totalAmount || 0;
+    }, [slip, pricingRules, isInvoice, isDelivery, forceDisplayPrice]);
 
     // 内部計算用の値を抽出
     const prevAmt = slip.previousBillingAmount || 0;
     const payRec = slip.paymentReceived || 0;
     const carriedForward = prevAmt - payRec;
-    const currentSales = slip.totalAmount || 0;
-    const currentTax = slip.taxAmount || 0;
+    const currentSales = currentSlipTotal;
+    const currentTax = Math.round(currentSales * 0.1);
     const currentGrandTotal = carriedForward + currentSales + currentTax;
 
-    const isGlobal = slip.constructionName === '全現場一括集計';
-    const isDetail = slip.type === 'invoice' || slip.type === 'delivery';
-
     // 出庫・納品系の伝票か
-    const isWorkSlip = slip.type === 'outbound';
-    const isProvisional = slip.type === 'provisional' || slip.type === 'reslip';
-    const isDualQty = isWorkSlip || isProvisional;
+    const isReslip = slip.type === 'reslip';
+    const isDualQty = isWorkSlip || isProvisional || isReslip;
 
     // 金額表示のロジック
-    // 納品明細書(delivery)、請求明細書(invoice)、返品伝票(return)、総括表(cover)のみ金額を表示
-    // 出庫伝票(outbound)、仮納品書(provisional)、欠品伝票(reslip)は金額を表示しない（forceDisplayPriceがtrueの場合を除く）
     const displayPrice = forceDisplayPrice || ['delivery', 'invoice', 'return', 'cover'].includes(slip.type);
 
     if (isCover) {
@@ -417,9 +437,18 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                         {Array.from({ length: 16 }).map((_, idx) => {
                             const item = slip.items?.[idx];
                             const orderedQty = item ? item.quantity : 0;
-                            // 出庫作業票(outbound)の場合は、納品数欄を強制的に白抜き(null)にする
                             const deliveredQty = item ? (isWorkSlip ? null : (item.deliveredQuantity ?? item.quantity)) : null;
-                            const amount = item ? ((item.appliedPrice || 0) * (item.deliveredQuantity ?? item.quantity)) : 0;
+                            
+                            let effectivePrice = item?.appliedPrice || 0;
+                            if (item && pricingRules.length > 0 && !item.slipItemNote && !item.name.includes('※特値')) {
+                                const latestPrice = getAppliedPrice(item, slip.customerName || null, slip.constructionName || null, pricingRules);
+                                // 再計算結果が0の場合は保存済みの値を優先（マスター未設定の商品を保護）
+                                if (latestPrice > 0 && (effectivePrice === 0 || isInvoice || isDelivery || forceDisplayPrice)) {
+                                    effectivePrice = latestPrice;
+                                }
+                            }
+
+                            const amount = item ? (effectivePrice * (item.deliveredQuantity ?? item.quantity)) : 0;
 
                             const isLastRow = idx === 15;
                             return (
@@ -439,7 +468,6 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                                                 {item ? (orderedQty < 0 ? `▲${Math.abs(orderedQty).toLocaleString()}` : orderedQty.toLocaleString()) : ''}
                                             </td>
                                             <td className={`px-2 text-center font-mono font-black ${!item ? '' : (deliveredQty === null ? 'bg-slate-50' : (deliveredQty !== orderedQty ? 'text-rose-600' : ''))} ${displayPrice ? 'border-r' : ''}`}>
-                                                {/* 出庫伝票(isWorkSlip)かつアイテムがある場合は、手書き用に空欄を表示 */}
                                                 {item ? (deliveredQty === null ? '' : (deliveredQty < 0 ? `▲${Math.abs(deliveredQty).toLocaleString()}` : deliveredQty.toLocaleString())) : ''}
                                             </td>
                                         </>
@@ -449,7 +477,7 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                                         </td>
                                     )}
 
-                                    {displayPrice && <td className="px-2 text-right border-r font-mono">{item ? `¥${(item.appliedPrice || 0).toLocaleString()}` : ''}</td>}
+                                    {displayPrice && <td className="px-2 text-right border-r font-mono">{item ? `¥${(effectivePrice || 0).toLocaleString()}` : ''}</td>}
                                     {displayPrice && <td className="px-2 text-right font-mono font-bold">{item ? (amount < 0 ? `▲¥${Math.abs(amount).toLocaleString()}` : `¥${amount.toLocaleString()}`) : ''}</td>}
                                 </tr>
                             );
@@ -470,12 +498,12 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                         <div className="border-2 border-slate-800 p-2 bg-slate-50 min-w-[200px] shadow-sm">
                             {isDetail ? (
                                 <div className="space-y-1">
-                                    <div className="flex justify-between text-base pt-1 font-black text-slate-900"><span className="text-slate-700">税抜合計金額 (10%対象)</span><span className="font-mono underline underline-offset-2 decoration-double decoration-slate-900">¥{(slip.totalAmount || 0).toLocaleString()}</span></div>
+                                    <div className="flex justify-between text-base pt-1 font-black text-slate-900"><span className="text-slate-700">税抜合計金額 (10%対象)</span><span className="font-mono underline underline-offset-2 decoration-double decoration-slate-900">¥{currentSales.toLocaleString()}</span></div>
                                 </div>
                             ) : (
                                 <>
                                     <div className="text-center font-bold text-[8px] border-b border-slate-300 pb-1 mb-1 text-slate-500 uppercase tracking-widest">御計算金額 (税抜)</div>
-                                    <div className="text-xl font-mono font-black text-center">{(slip.totalAmount || 0) < 0 ? `▲¥${Math.abs(slip.totalAmount || 0).toLocaleString()}` : `¥${(slip.totalAmount || 0).toLocaleString()}`}</div>
+                                    <div className="text-xl font-mono font-black text-center">{currentSales < 0 ? `▲¥${Math.abs(currentSales).toLocaleString()}` : `¥${currentSales.toLocaleString()}`}</div>
                                 </>
                             )}
                         </div>
@@ -485,7 +513,6 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                 {!isDetail && (
                     <div className="pt-3 flex justify-end gap-0">
                         {isWorkSlip ? (
-                            /* 出庫用: お客様直接引取りサイン欄を追加 */
                             <table className="border-collapse border-2 border-slate-900 w-full text-[8px] h-24">
                                 <tbody>
                                     <tr className="bg-slate-50 border-b border-slate-900">
@@ -501,7 +528,6 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                                 </tbody>
                             </table>
                         ) : (
-                            /* 仮納品書: 現場荷受用 */
                             <table className="border-collapse border-2 border-slate-900 w-full text-[8px] h-24">
                                 <tbody>
                                     <tr className="bg-slate-50 border-b border-slate-900">
@@ -511,7 +537,6 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                                         <td className="py-1 font-black text-center w-1/4 text-blue-800 bg-blue-50/20">現場荷受サイン (受領印)</td>
                                     </tr>
                                     <tr className="h-20 text-center align-middle">
-                                        {/* 出庫印 */}
                                         <td className="border-r border-slate-900 group relative">
                                             <input
                                                 value={slip.issuerPerson || ''}
@@ -525,7 +550,6 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                                                 </div>
                                             )}
                                         </td>
-                                        {/* 配送印 */}
                                         <td className="border-r border-slate-900 group relative">
                                             <input
                                                 value={slip.deliveryPerson || ''}
@@ -539,7 +563,6 @@ const SlipPage = ({ slip, pageNum, totalPages, forceDisplayPrice = false, settin
                                                 </div>
                                             )}
                                         </td>
-                                        {/* 受領印 (直接引取) */}
                                         <td className="border-r border-slate-900 group relative">
                                             <input
                                                 value={slip.receiverPerson || ''}
@@ -587,7 +610,6 @@ const CartItemRow = React.memo(({
     const [isNoteOpen, setIsNoteOpen] = useState(!!item.slipItemNote);
     const [localQty, setLocalQty] = useState(item.quantity.toString());
 
-    // 外部（親）からの数量変更を同期
     useEffect(() => {
         if (parseInt(localQty) !== item.quantity && localQty !== '-') {
             setLocalQty(item.quantity.toString());
@@ -692,12 +714,11 @@ const CartItemRow = React.memo(({
                     <td className="text-center">
                         <div className="relative">
                             <input
-                                type="text" // 数字以外の一時的な入力を許可
+                                type="text"
                                 inputMode="numeric"
                                 value={localQty}
                                 onChange={e => {
                                     const val = e.target.value;
-                                    // 空文字、マイナスのみ、または正規の数値を許可
                                     if (val === '' || val === '-' || /^-?\d*$/.test(val)) {
                                         setLocalQty(val);
                                         const n = parseInt(val);
@@ -779,15 +800,12 @@ export const SlipManager: React.FC<{
     const [activeTab, setActiveTab] = useState<'create' | 'pending' | 'reslip' | 'history'>(initialTab);
     const [activeMode, setActiveMode] = useState<'sales' | 'return'>(mode);
 
-    // Sync internal state with prop if it changes? Or just init? 
-    // Usually standard is to rely on internal, but notifying parent.
     const handleTabChange = (tab: 'create' | 'pending' | 'reslip' | 'history') => {
         setActiveTab(tab);
         if (onTabChange) onTabChange(tab);
     };
     const [slips, setSlips] = useState<Slip[]>([]);
     
-    // Auto-chunk slips > 16 items for printing pagination without modifying internal slip logic
     const [rawPrintingSlips, setRawPrintingSlips] = useState<Slip[]>([]);
     const printingSlips = useMemo(() => {
         const result: Slip[] = [];
@@ -829,19 +847,14 @@ export const SlipManager: React.FC<{
 
     useEffect(() => {
         const handleResize = () => {
-            // A4 width in px (approximate for screen)
-            // 210mm is roughly 794px at 96dpi. We want some padding.
-            // We can just use the window width / 2 or so for the preview to fit nicely.
-            // Let's try to fit 210mm into the available width with some margin.
-            const availableWidth = window.innerWidth - 64; // loose padding
-            const availableHeight = window.innerHeight - 100; // header padding
-            const a4Width = 794; // 210mm @ 96dpi
-            const a4Height = 1123; // 297mm @ 96dpi
+            const availableWidth = window.innerWidth - 64;
+            const availableHeight = window.innerHeight - 100;
+            const a4Width = 794;
+            const a4Height = 1123;
 
             const scaleW = availableWidth / a4Width;
             const scaleH = availableHeight / a4Height;
 
-            // Use the smaller scale to fit entirely, but cap at 1.0 or slightly larger if big screen
             setPreviewScale(Math.min(scaleW, scaleH, 1.2));
         };
         window.addEventListener('resize', handleResize);
@@ -881,12 +894,10 @@ export const SlipManager: React.FC<{
         return () => { if (unsubscribe && typeof unsubscribe === 'function') (unsubscribe as any)(); };
     }, []);
 
-    // 顧客・現場が変更された際にカート内の単価を自動再計算する
     useEffect(() => {
         if (cart.length === 0) return;
         
         const nextCart = cart.map(item => {
-            // マスターに存在する資材のみ再計算対象とする（自由入力行は除外）
             const realId = item.id.includes('__') ? item.id.split('__')[0] : item.id;
             const master = masterItems.find(mi => mi.id === realId);
             if (!master) return item;
@@ -898,12 +909,11 @@ export const SlipManager: React.FC<{
             return item;
         });
 
-        // 差分がある場合のみ更新を実行
         const isChanged = nextCart.some((it, idx) => it.appliedPrice !== cart[idx].appliedPrice);
         if (isChanged) {
             onUpdateCart(nextCart);
         }
-    }, [customerName, siteName, pricingRules, masterItems, onUpdateCart]); // cart.lengthの変化も含むために、cartは依存に含めず、内容比較で制御
+    }, [customerName, siteName, pricingRules, masterItems, onUpdateCart]);
 
     const { pendingOutbounds, archivedSlips, reslips } = useMemo(() => {
         const pending: Slip[] = []; const archived: Slip[] = []; const res: Slip[] = [];
@@ -943,8 +953,6 @@ export const SlipManager: React.FC<{
         }
     };
 
-
-
     const existingSiteNames = useMemo(() => {
         if (!customerName) return [];
         const sites = new Set<string>();
@@ -981,20 +989,17 @@ export const SlipManager: React.FC<{
         return customers.filter((c: Customer) => normalize(c.name).includes(normalize(customerName))).slice(0, 5);
     }, [customerName, showSuggestions, customers]);
 
-    // 現場の納品履歴アイテム（過去の「山」）の計算
     const siteHistoryItems = useMemo(() => {
         if (!customerName || !siteName) return [];
         
-        // (キー) -> 実績データ
         const historyMap = new Map<string, { 
             name: string; model: string; dims: string; price: number; month: string; 
             totalDelivered: number; totalReturned: number; item: SlipItem 
         }>();
 
         slips.forEach(s => {
-            // 現在編集中の伝票は実績計算から除外して、過剰返品チェックの二重カウントを防ぐ
             if (s.customerName === customerName && s.constructionName === siteName && s.id !== editingSlipId) {
-                const month = s.date.slice(0, 7); // YYYY-MM
+                const month = s.date.slice(0, 7);
                 if (s.type === 'provisional' || s.type === 'delivery') {
                     s.items.forEach(item => {
                         const key = `${item.name}-${item.model}-${item.dimensions}-${item.appliedPrice}-${month}`;
@@ -1034,7 +1039,6 @@ export const SlipManager: React.FC<{
     const itemSuggestions = useMemo(() => {
         if (!itemSearchQuery.trim()) return [];
         if (activeMode === 'return') {
-            // 返品モード時は納品履歴から検索
             return siteHistoryItems.filter(i => 
                 normalizeForSearch(i.name).includes(normalizeForSearch(itemSearchQuery)) ||
                 normalizeForSearch(i.model || '').includes(normalizeForSearch(itemSearchQuery)) ||
@@ -1133,12 +1137,9 @@ export const SlipManager: React.FC<{
             };
             await storage.addMaterial(materialData);
             alert('資材マスターに登録しました。');
-            // IDを更新して、再登録を防ぐ
             onUpdateCart(prev => prev.map(i => i.id === item.id ? { ...i, id: 'registered-' + Date.now() + '__' + generateId() } : i));
         }
     }, [onUpdateCart]);
-
-
 
     const handleSave = async () => {
         if (!customerName || cart.length === 0 || !receivingPerson.trim()) {
@@ -1152,7 +1153,6 @@ export const SlipManager: React.FC<{
                 return { ...i, id: realId, quantity: qty, deliveredQuantity: qty, date: slipDate };
             });
 
-            // 返品モード時の過剰数量チェック
             if (activeMode === 'return') {
                 const overReturns = processedItems.filter(i => {
                     const avail = (i as any).availableQuantity;
@@ -1179,7 +1179,7 @@ export const SlipManager: React.FC<{
                     await storage.updateSlip(editingSlipId, updateData);
                     setEditingSlipId(null);
                     onClearCart();
-                    handleTabChange(preEditTab); // return to the tab we came from
+                    handleTabChange(preEditTab);
                 } catch (e: any) {
                     alert(`保存に失敗しました: ${e?.message || '不明なエラー'}`);
                 }
@@ -1194,7 +1194,6 @@ export const SlipManager: React.FC<{
                     orderingPerson, customerOrderNumber, receivingPerson, type: activeMode === 'return' ? 'return' : 'outbound', isClosed: activeMode === 'return'
                 };
                 const newId = await storage.addSlip(cleanForFirestore(newSlip));
-                // 新規保存時は自動的にピッキング用伝票を表示（金額表示なし）
                 setPrintingSlips([{ ...newSlip, id: newId } as Slip]);
                 onClearCart();
                 handleTabChange(activeMode === 'return' ? 'history' : 'pending');
@@ -1228,8 +1227,14 @@ export const SlipManager: React.FC<{
                 const key = `${item.id}-${idx}`;
                 const actual = actualQuantities[key] ?? item.quantity;
                 const shortage = item.quantity - actual;
-                if (actual > 0) deliveredItems.push({ ...item, quantity: item.quantity, deliveredQuantity: actual, sourceSlipNo: confirmingOutbound.slipNumber });
-                if (shortage > 0) missingItems.push({ ...item, quantity: shortage, deliveredQuantity: 0 });
+                
+                let price = item.appliedPrice;
+                if (!item.slipItemNote && !item.name.includes('※特値')) {
+                    price = getAppliedPrice(item, confirmingOutbound.customerName, confirmingOutbound.constructionName || null, pricingRules);
+                }
+
+                if (actual > 0) deliveredItems.push({ ...item, appliedPrice: price, quantity: item.quantity, deliveredQuantity: actual, sourceSlipNo: confirmingOutbound.slipNumber });
+                if (shortage > 0) missingItems.push({ ...item, appliedPrice: price, quantity: shortage, deliveredQuantity: 0 });
             });
 
             const total = deliveredItems.reduce((s, i) => s + ((i.appliedPrice || 0) * (i.deliveredQuantity ?? 0)), 0);
@@ -1244,7 +1249,7 @@ export const SlipManager: React.FC<{
                 createdAt: Date.now(),
                 issuerPerson: issuer,
                 isClosed: true,
-                isHandled: true // Sync correctly back to LINK so the order is marked completed
+                isHandled: true
             };
 
             await storage.addSlip(cleanForFirestore(provSlip));
@@ -1268,7 +1273,6 @@ export const SlipManager: React.FC<{
             setConfirmingOutbound(null);
             setIssuerName('');
             handleTabChange(missingItems.length > 0 ? 'reslip' : 'pending');
-            // お客様渡し用の仮納品書を発行
             setPrintingSlips([{ ...provSlip, id: generateId() } as Slip]);
         } finally { setIsSaving(false); }
     };
@@ -1305,7 +1309,18 @@ export const SlipManager: React.FC<{
             s.items.forEach(i => {
                 const qty = i.deliveredQuantity ?? i.quantity; if (qty === 0) return;
                 const isReturning = s.type === 'return' || qty < 0;
-                const itemKey = `${s.date}_${s.slipNumber || 'UNK'}_${isReturning ? 'RET' : 'SALE'}_${i.name}_${i.model}_${i.appliedPrice}`;
+                
+                // 請求書作成時に最新単価を再確認（手動修正メモがない場合）
+                let price = i.appliedPrice;
+                if (!i.slipItemNote && !i.name.includes('※特値')) {
+                    const realId = i.id.includes('__') ? i.id.split('__')[0] : i.id;
+                    const master = masterItems.find(m => m.id === realId);
+                    if (master) {
+                        price = getAppliedPrice(master, s.customerName, s.constructionName || null, pricingRules);
+                    }
+                }
+
+                const itemKey = `${s.date}_${s.slipNumber || 'UNK'}_${isReturning ? 'RET' : 'SALE'}_${i.name}_${i.model}_${price}`;
 
                 if (itemsMap.has(itemKey)) {
                     const ex = itemsMap.get(itemKey)!;
@@ -1314,6 +1329,7 @@ export const SlipManager: React.FC<{
                 } else {
                     itemsMap.set(itemKey, {
                         ...i,
+                        appliedPrice: price,
                         name: isReturning ? `(返品) ${i.name}` : i.name,
                         quantity: qty,
                         deliveredQuantity: qty,
@@ -1321,7 +1337,7 @@ export const SlipManager: React.FC<{
                         sourceSlipNo: s.slipNumber
                     });
                 }
-                siteTotals.set(currentSKey, (siteTotals.get(currentSKey) || 0) + ((i.appliedPrice || 0) * qty));
+                siteTotals.set(currentSKey, (siteTotals.get(currentSKey) || 0) + (price * qty));
             });
         });
 
@@ -1470,15 +1486,15 @@ export const SlipManager: React.FC<{
         return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
     }, [archivedSlips, historySearchQuery, targetMonth, customers]);
 
-    const tabs = initialTab === 'history'
-        ? [{ id: 'history', label: '納品・請求履歴', icon: History }]
-        : (editingSlipId
-            ? [{ id: 'create', label: '仮納品書の修正', icon: Edit3 }]
+    const tabs = editingSlipId
+        ? [{ id: 'create', label: '仮納品書の修正', icon: Edit3 }, { id: 'history', label: '納品・請求履歴', icon: History }]
+        : initialTab === 'history'
+            ? [{ id: 'history', label: '納品・請求履歴', icon: History }]
             : [
                 { id: 'create', label: '1. 出庫・返品作成', icon: Edit2 },
                 { id: 'pending', label: `2. 出庫待ち (${pendingOutbounds.length})`, icon: Clock },
                 { id: 'reslip', label: `3. 欠品・未納分 (${reslips.length})`, icon: AlertTriangle }
-            ]);
+            ];
 
     return (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -1641,6 +1657,7 @@ export const SlipManager: React.FC<{
                                                 totalPages={printingSlips.length}
                                                 forceDisplayPrice={forceDisplayPrice}
                                                 settings={settings}
+                                                pricingRules={pricingRules}
                                                 onUpdateSlip={(updates) => {
                                                     setPrintingSlips(prev => prev.map((s, i) => i === idx ? { ...s, ...updates } : s));
                                                     const baseId = slip.id ? slip.id.replace(/-pg\d+$/, '') : null;
@@ -1661,7 +1678,7 @@ export const SlipManager: React.FC<{
                         <div id="slip-print-portal">
                             {printingSlips.map((s, i) => (
                                 <div key={`print-${s.id || i}`} className="slip-print-page">
-                                    <SlipPage slip={s} pageNum={i + 1} totalPages={printingSlips.length} forceDisplayPrice={forceDisplayPrice} settings={settings} />
+                                    <SlipPage slip={s} pageNum={i + 1} totalPages={printingSlips.length} forceDisplayPrice={forceDisplayPrice} settings={settings} pricingRules={pricingRules} />
                                 </div>
                             ))}
                         </div>,
@@ -1937,7 +1954,21 @@ export const SlipManager: React.FC<{
                                                     <div className="ml-4 px-3 py-1 bg-emerald-400/10 border border-emerald-400/20 rounded-full flex items-center gap-2 animate-in fade-in zoom-in duration-300">
                                                         <span className="text-[10px] font-black text-emerald-500/60 uppercase tracking-tighter">TOTAL:</span>
                                                         <span className="text-base md:text-lg font-mono font-black text-emerald-400">
-                                                            ¥{Math.round((Array.from(sMap.values()).flat() as Slip[]).reduce((acc, s) => acc + (s.grandTotal ?? ((s.totalAmount || 0) * 1.1)), 0)).toLocaleString()}
+                                                            ¥{Math.round((Array.from(sMap.values()).flat() as Slip[]).reduce((acc, s) => {
+                                                                let total = s.totalAmount || 0;
+                                                                if (pricingRules && pricingRules.length > 0 && s.items) {
+                                                                    total = s.items.reduce((iAcc, item) => {
+                                                                        let price = item.appliedPrice || 0;
+                                                                        if (!item.slipItemNote && !item.name.includes('※特値')) {
+                                                                            const latest = getAppliedPrice(item, s.customerName, s.constructionName || null, pricingRules);
+                                                                            // 再計算結果が0の場合は保存済み値を使用
+                                                                            if (latest > 0) price = latest;
+                                                                        }
+                                                                        return iAcc + (price * (item.deliveredQuantity ?? item.quantity));
+                                                                    }, 0);
+                                                                }
+                                                                return acc + (total * 1.1);
+                                                            }, 0)).toLocaleString()}
                                                         </span>
                                                         <span className="text-[10px] font-black text-emerald-400 opacity-60">(税込)</span>
                                                     </div>
@@ -1974,7 +2005,21 @@ export const SlipManager: React.FC<{
                                                                         </div>
                                                                         <div className="sm:hidden border-t border-slate-100 my-1"></div>
                                                                         <div className="font-mono font-black text-slate-900 sm:w-32 sm:text-right">
-                                                                            ¥{(sl.totalAmount || 0).toLocaleString()}
+                                                                            ¥{(() => {
+                                                                                let total = sl.totalAmount || 0;
+                                                                                if (pricingRules && pricingRules.length > 0 && sl.items) {
+                                                                                    total = sl.items.reduce((acc, item) => {
+                                                                                        let price = item.appliedPrice || 0;
+                                                                                        if (!item.slipItemNote && !item.name.includes('※特値')) {
+                                                                                            const latest = getAppliedPrice(item, sl.customerName, sl.constructionName || null, pricingRules);
+                                                                                            // 再計算結果が0の場合は保存済み値を使用
+                                                                                            if (latest > 0) price = latest;
+                                                                                        }
+                                                                                        return acc + (price * (item.deliveredQuantity ?? item.quantity));
+                                                                                    }, 0);
+                                                                                }
+                                                                                return total;
+                                                                            })().toLocaleString()}
                                                                         </div>
                                                                     </div>
                                                                     <div className="flex items-center justify-end gap-3 shrink-0">

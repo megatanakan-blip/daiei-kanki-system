@@ -53,10 +53,11 @@ export const normalizeForSearch = (text: string): string => {
     // 4. Lowercase
     normalized = normalized.toLowerCase();
 
-    // 5. Replace full-width space with half-width for consistency
+    // 5. Replace full-width space with half-width and collapse multiple spaces for consistency
     normalized = normalized.replace(/　/g, ' ');
+    normalized = normalized.replace(/\s+/g, ' ');
 
-    return normalized;
+    return normalized.trim();
 };
 
 export const calculateRelevanceScore = (item: MaterialItem, keywords: string[]): number => {
@@ -168,7 +169,8 @@ export const getAppliedPrice = (item: MaterialItem, activeCustomer: string | nul
     const basePrice = item.sellingPrice || 0;
     if (!activeCustomer) return basePrice;
 
-    const customerRules = pricingRules.filter(r => r.customerName === activeCustomer);
+    const normCust = normalizeForSearch(activeCustomer);
+    const customerRules = pricingRules.filter(r => normalizeForSearch(r.customerName) === normCust);
     if (customerRules.length === 0) return basePrice;
 
     const findBestRule = (scopeRules: any[]) => {
@@ -190,7 +192,8 @@ export const getAppliedPrice = (item: MaterialItem, activeCustomer: string | nul
     // 優先順位: 1. 現場別ルール 2. 顧客共通ルール
     let rule: any;
     if (activeSite && activeSite !== '') {
-        const siteRules = customerRules.filter(r => r.siteName === activeSite);
+        const normSite = normalizeForSearch(activeSite);
+        const siteRules = customerRules.filter(r => normalizeForSearch(r.siteName || '') === normSite);
         rule = findBestRule(siteRules);
     }
 
