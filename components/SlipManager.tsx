@@ -956,20 +956,19 @@ export const SlipManager: React.FC<{
     const existingSiteNames = useMemo(() => {
         if (!customerName) return [];
         const sites = new Set<string>();
-        // 伝票履歴から現場名を取得（返品時に最も重要）
+        // 実納品実績（仮納品書・納品書）がある現場名のみを取得
         slips.forEach(s => {
-            if (s.customerName === customerName && s.constructionName && s.constructionName.trim()) {
+            if (
+                s.customerName === customerName &&
+                (s.type === 'provisional' || s.type === 'delivery') &&
+                s.constructionName && s.constructionName.trim()
+            ) {
                 sites.add(s.constructionName.trim());
             }
         });
-        // 価格ルールからも取得
-        pricingRules.forEach(r => {
-            if (r.customerName === customerName && r.siteName) {
-                sites.add(r.siteName);
-            }
-        });
         return Array.from(sites).sort();
-    }, [customerName, pricingRules, slips]);
+    }, [customerName, slips]);
+
 
     const filteredSiteSuggestions = useMemo(() => {
         if (!siteName.trim()) return existingSiteNames;
