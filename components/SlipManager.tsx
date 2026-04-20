@@ -956,18 +956,25 @@ export const SlipManager: React.FC<{
     const existingSiteNames = useMemo(() => {
         if (!customerName) return [];
         const sites = new Set<string>();
+        // 伝票履歴から現場名を取得（返品時に最も重要）
+        slips.forEach(s => {
+            if (s.customerName === customerName && s.constructionName && s.constructionName.trim()) {
+                sites.add(s.constructionName.trim());
+            }
+        });
+        // 価格ルールからも取得
         pricingRules.forEach(r => {
             if (r.customerName === customerName && r.siteName) {
                 sites.add(r.siteName);
             }
         });
         return Array.from(sites).sort();
-    }, [customerName, pricingRules]);
+    }, [customerName, pricingRules, slips]);
 
     const filteredSiteSuggestions = useMemo(() => {
         if (!siteName.trim()) return existingSiteNames;
-        const q = siteName.toLowerCase();
-        return existingSiteNames.filter(s => s.toLowerCase().includes(q));
+        const q = normalizeForSearch(siteName);
+        return existingSiteNames.filter(s => normalizeForSearch(s).includes(q));
     }, [siteName, existingSiteNames]);
 
     const handleApplyAIResults = (confirmedItems: any[]) => {
@@ -997,8 +1004,9 @@ export const SlipManager: React.FC<{
             totalDelivered: number; totalReturned: number; item: SlipItem 
         }>();
 
+        const normalizedSiteName = normalizeForSearch(siteName);
         slips.forEach(s => {
-            if (s.customerName === customerName && s.constructionName === siteName && s.id !== editingSlipId) {
+            if (s.customerName === customerName && normalizeForSearch(s.constructionName || '').includes(normalizedSiteName) && s.id !== editingSlipId) {
                 const month = s.date.slice(0, 7);
                 if (s.type === 'provisional' || s.type === 'delivery') {
                     s.items.forEach(item => {
@@ -1726,28 +1734,60 @@ export const SlipManager: React.FC<{
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="relative"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">顧客名 <span className="text-rose-500">*</span></label><input value={customerName} onChange={e => { setCustomerName(e.target.value); setShowSuggestions(true); }} className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold focus:ring-2 focus:ring-blue-500" placeholder="顧客を検索" />{showSuggestions && filteredSuggestions.length > 0 && (<div className="absolute z-10 w-full bg-white border shadow-lg rounded-2xl mt-1 overflow-hidden">{filteredSuggestions.map(c => <div key={c.id} onClick={() => { setCustomerName(c.name); setShowSuggestions(false); }} className="p-4 hover:bg-blue-50 cursor-pointer text-sm font-bold border-b last:border-0">{c.name}</div>)}</div>)}</div>
                                         <div className="relative">
-                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">現場名</label>
-                                            <input 
-                                                value={siteName} 
-                                                onChange={e => { setSiteName(e.target.value); setShowSiteSuggestions(true); }} 
-                                                onFocus={() => setShowSiteSuggestions(true)}
-                                                className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold focus:ring-2 focus:ring-blue-500" 
-                                                placeholder="一般・共通" 
-                                            />
-                                            {showSiteSuggestions && filteredSiteSuggestions.length > 0 && (
-                                                <div className="absolute z-10 w-full bg-white border shadow-lg rounded-2xl mt-1 overflow-hidden">
-                                                    {filteredSiteSuggestions.map(s => (
-                                                        <div 
-                                                            key={s} 
-                                                            onClick={() => { setSiteName(s); setShowSiteSuggestions(false); }} 
-                                                            className="p-4 hover:bg-blue-50 cursor-pointer text-sm font-bold border-b last:border-0"
-                                                        >
-                                                            {s}
+                                            <label className={`text-[10px] font-black uppercase tracking-widest mb-1 block ${activeMode === 'return' ? 'text-rose-500' : 'text-slate-400'}`}>
+                                                現場名 {activeMode === 'return' && <span className="text-rose-500 normal-case font-bold">（返品時は必ず選択）</span>}
+                                            </label>
+                                            <div className="relative">
+                                                <Search size={14} className={`absolute left-3 top-1/2 -translate-y-1/2 ${activeMode === 'return' ? 'text-rose-400' : 'text-slate-300'} pointer-events-none`} />
+                                                <input 
+                                                    value={siteName} 
+                                                    onChange={e => { setSiteName(e.target.value); setShowSiteSuggestions(true); }} 
+                                                    onFocus={() => setShowSiteSuggestions(true)}
+                                                    onBlur={() => setTimeout(() => setShowSiteSuggestions(false), 200)}
+                                                    className={`w-full pl-8 pr-4 py-3 bg-slate-50 border-2 rounded-2xl font-bold focus:outline-none transition-all ${activeMode === 'return' ? 'border-rose-200 focus:ring-2 focus:ring-rose-400 focus:border-rose-400' : 'border-slate-200 focus:ring-2 focus:ring-blue-500'}`}
+                                                    placeholder={activeMode === 'return' ? "現場名を検索・選択..." : "一般・共通"} 
+                                                />
+                                            </div>
+                                            {showSiteSuggestions && (
+                                                <div className="absolute z-20 w-full bg-white border-2 border-rose-100 shadow-xl rounded-2xl mt-1 max-h-60 overflow-y-auto">
+                                                    {filteredSiteSuggestions.length > 0 ? (
+                                                        <>
+                                                            <div className="px-3 py-1.5 bg-rose-50 border-b border-rose-100">
+                                                                <span className="text-[9px] font-black text-rose-400 uppercase tracking-widest">
+                                                                    納品履歴のある現場 ({filteredSiteSuggestions.length}件)
+                                                                </span>
+                                                            </div>
+                                                            {filteredSiteSuggestions.map(s => {
+                                                                const count = slips.filter(slip => slip.customerName === customerName && slip.constructionName === s && (slip.type === 'provisional' || slip.type === 'delivery')).length;
+                                                                return (
+                                                                    <div 
+                                                                        key={s} 
+                                                                        onMouseDown={() => { setSiteName(s); setShowSiteSuggestions(false); }} 
+                                                                        className="px-4 py-3 hover:bg-rose-50 cursor-pointer border-b border-slate-50 last:border-0 flex items-center justify-between"
+                                                                    >
+                                                                        <div className="flex items-center gap-2">
+                                                                            <MapPin size={12} className="text-rose-400 shrink-0" />
+                                                                            <span className="text-sm font-bold text-slate-800">{s}</span>
+                                                                        </div>
+                                                                        {count > 0 && (
+                                                                            <span className="text-[9px] font-black text-rose-500 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full shrink-0">
+                                                                                納品 {count}件
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </>
+                                                    ) : customerName ? (
+                                                        <div className="px-4 py-4 text-center text-xs text-slate-400 font-bold">
+                                                            <MapPin size={16} className="mx-auto mb-1 text-slate-300" />
+                                                            この顧客の現場履歴はありません
                                                         </div>
-                                                    ))}
+                                                    ) : null}
                                                 </div>
                                             )}
                                         </div>
+
                                     </div>
                                     <div className="grid grid-cols-2 gap-4">
                                         <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 block">発注者</label><input value={orderingPerson} onChange={e => setOrderingPerson(e.target.value)} placeholder="発注者名" className="w-full px-4 py-3 bg-slate-50 border rounded-2xl font-bold" /></div>
