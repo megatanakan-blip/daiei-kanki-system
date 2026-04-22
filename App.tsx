@@ -16,6 +16,7 @@ import { AITakahashi } from './components/AITakahashi';
 import { LinkUserManagement } from './components/LinkUserManagement';
 import { generateMaterialsFromFile } from './services/geminiService';
 import * as storage from './services/firebaseService';
+import { deduplicateMaterials } from './services/firebaseService';
 import { normalizeForSearch, filterAndSortItems, getAppliedPrice } from './services/searchUtils';
 import * as XLSX from 'xlsx';
 
@@ -59,6 +60,7 @@ const App: React.FC = () => {
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const restoreInputRef = useRef<HTMLInputElement>(null);
+    const excelRestoreInputRef = useRef<HTMLInputElement>(null);
 
     const pendingOutboundsCount = useMemo(() =>
         slips.filter(s => s.type === 'outbound' && !s.isClosed).length,
@@ -216,6 +218,45 @@ const App: React.FC = () => {
             XLSX.writeFile(workbook, fileName);
         } catch (err) {
             alert(`${format.toUpperCase()}の書き出しに失敗しました。`);
+        }
+    };
+
+    const handleExcelRestore = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        try {
+            const data = await file.arrayBuffer();
+            const workbook = XLSX.read(data);
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+            const rows: any[] = XLSX.utils.sheet_to_json(sheet);
+
+            if (rows.length === 0) { alert('データが見つかりませんでした。'); return; }
+
+            // Excelの列名 → Materialフィールドにマッピング
+            const mapped = rows.map(row => ({
+                category:     String(row['カテゴリー'] || row['category'] || '消耗品・雑材'),
+                name:         String(row['品名']       || row['name']     || ''),
+                model:        String(row['型式・仕様'] || row['model']    || ''),
+                dimensions:   String(row['寸法・サイズ']|| row['dimensions'] || ''),
+                listPrice:    Number(row['定価']       || row['listPrice']  || 0),
+                sellingPrice: Number(row['標準売価']   || row['sellingPrice']|| 0),
+                costPrice:    Number(row['仕入原価']   || row['costPrice']  || 0),
+                unit:         String(row['単位']       || row['unit']    || '個'),
+                notes:        String(row['備考']       || row['notes']   || ''),
+                quantity:     Number(row['数量']       || row['quantity']|| 0),
+                location:     String(row['保管場所']   || row['location']|| ''),
+                manufacturer: String(row['メーカー']   || row['manufacturer'] || ''),
+            })).filter(r => r.name); // 品名がないものは除外
+
+            if (!window.confirm(`${mapped.length.toLocaleString()}件のExcelデータをインポートしますか？\n（既存データへの追加になります）`)) return;
+            setLoadingAI(true);
+            await storage.importMaterials(mapped);
+            alert(`${mapped.length.toLocaleString()}件をインポートしました。`);
+        } catch (err) {
+            alert('Excelの読み込みに失敗しました。列名を確認してください。');
+        } finally {
+            setLoadingAI(false);
+            if (excelRestoreInputRef.current) excelRestoreInputRef.current.value = '';
         }
     };
 
@@ -514,7 +555,7 @@ const App: React.FC = () => {
                                     <ShoppingCart size={18} /> <span className="hidden md:inline">発注・入荷管理</span>
                                 </button>
                                 <div className="h-8 w-px bg-slate-200 mx-1 md:mx-2"></div>
-                                <button onClick={() => setIsMasterViewOpen(false)} className="p-3 bg-slate-100 hover:bg-slate-200 rounded-2xl transition-all"><X size={24} /></button>
+                                <button onClick={() => { setIsMasterViewOpen(false); setSelectedIds(new Set()); }} className="p-3 bg-slate-100 hover:bg-slate-200 rounded-2xl transition-all"><X size={24} /></button>
                             </div>
                         </div>
                         <div className="flex-1 overflow-hidden flex flex-col p-8">
@@ -539,6 +580,25 @@ const App: React.FC = () => {
                             <button onClick={handleLocalExport} className="flex items-center gap-2 text-slate-500 hover:text-indigo-600 text-[10px] font-black uppercase transition-all"><Database size={14} /> JSONバックアップ</button>
                             <input type="file" ref={restoreInputRef} onChange={handleLocalRestore} className="hidden" accept=".json" />
                             <button onClick={() => restoreInputRef.current?.click()} className="flex items-center gap-2 text-slate-500 hover:text-orange-600 text-[10px] font-black uppercase transition-all"><RotateCcw size={14} /> JSONから復元</button>
+                            <input type="file" ref={excelRestoreInputRef} onChange={handleExcelRestore} className="hidden" accept=".xlsx,.xls,.csv" />
+                            <button onClick={() => excelRestoreInputRef.current?.click()} className="flex items-center gap-2 text-slate-500 hover:text-emerald-600 text-[10px] font-black uppercase transition-all"><FileText size={14} /> Excelから復元</button>
+                            <button
+                                onClick={async () => {
+                                    if (!window.confirm(`重複資材を自動削除します。\n\n【重複判定の条件】\n「品名＋型式＋寸法＋カテゴリ」が完全一致するもの\n→ 更新日が古い方を削除します\n\n【安全ガード】\n型式と寸法が両方とも未入力のものは\n削除対象から除外します\n（例：「白SGP 25A」と「白SGP 32A」が\n  寸法未入力だと同一とみなされる誤削除を防止）\n\n現在 ${items.length.toLocaleString()} 件\n\nよろしいですか？`)) return;
+                                    try {
+                                        setLoadingAI(true);
+                                        const deleted = await deduplicateMaterials(items);
+                                        alert(`✅ 重複除去完了！\n${deleted.toLocaleString()} 件の重複を削除しました。`);
+                                    } catch (e) {
+                                        alert('エラーが発生しました: ' + e);
+                                    } finally {
+                                        setLoadingAI(false);
+                                    }
+                                }}
+                                className="flex items-center gap-2 text-slate-500 hover:text-rose-600 text-[10px] font-black uppercase transition-all"
+                            >
+                                <Trash2 size={14} /> 重複除去
+                            </button>
                             <button onClick={() => handleExcelExport('xlsx')} className="flex items-center gap-2 text-slate-500 hover:text-emerald-600 text-[10px] font-black uppercase transition-all"><FileText size={14} /> MASTER EXCEL出力</button>
                             <button onClick={() => handleExcelExport('csv')} className="flex items-center gap-2 text-slate-500 hover:text-emerald-600 text-[10px] font-black uppercase transition-all"><FileText size={14} /> MASTER CSV出力</button>
                         </div>

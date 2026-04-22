@@ -8,11 +8,11 @@ import {
     doc,
     getDoc,
     query,
-    orderBy,
     where,
     getDocs,
     writeBatch,
     increment,
+    getCountFromServer,
     Unsubscribe
 } from 'firebase/firestore';
 import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
@@ -37,13 +37,17 @@ export const loginWithGoogle = () => signInWithPopup(auth, googleProvider);
 export const logout = () => signOut(auth);
 
 const subscribe = <T extends { id: string }>(collectionName: string, callback: (data: T[]) => void): Unsubscribe => {
-    const q = query(collection(db, collectionName), orderBy('updatedAt', 'desc'));
+    // NOTE: orderBy('updatedAt') は updatedAt フィールドが存在しないドキュメントを
+    // クエリから除外してしまうため、フィルタなしで全件取得しクライアント側でソートする。
+    const q = collection(db, collectionName);
     return onSnapshot(q, (snapshot) => {
         const data = snapshot.docs.map(doc => {
             const { id: _, ...docData } = doc.data() as any;
             // Ensure doc.id is used as the primary identifier
             return { ...docData, id: doc.id } as T;
         });
+        // updatedAt の降順ソートをクライアント側で実施
+        data.sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0));
         callback(data);
     }, (err) => console.error(`Sync Error [${collectionName}]:`, err));
 };
@@ -129,13 +133,18 @@ export const bulkSetCategory = async (ids: string[], newCategory: string) => {
 };
 
 export const importMaterials = async (items: Partial<Material>[]) => {
-    const batch = writeBatch(db);
-    items.forEach(item => {
-        const { id: _, ...data } = item as any;
-        const ref = doc(collection(db, COLLECTIONS.MATERIALS));
-        batch.set(ref, { ...data, updatedAt: Date.now() });
-    });
-    await batch.commit();
+    // Firestoreのバッチ書き込みは500件が上限のため、チャンクに分割して処理する
+    const CHUNK_SIZE = 499;
+    for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+        const chunk = items.slice(i, i + CHUNK_SIZE);
+        const batch = writeBatch(db);
+        chunk.forEach(item => {
+            const { id: _, ...data } = item as any;
+            const ref = doc(collection(db, COLLECTIONS.MATERIALS));
+            batch.set(ref, { ...data, updatedAt: Date.now() });
+        });
+        await batch.commit();
+    }
 };
 
 export const addCustomer = async (c: Omit<Customer, 'id'>) => {
@@ -266,4 +275,62 @@ export const receivePurchaseOrderItems = async (items: { id: string, quantity: n
 export const markSlipAsHandled = async (id: string) => {
     const docRef = doc(db, COLLECTIONS.SLIPS, id);
     await updateDoc(docRef, { isHandled: true, updatedAt: Date.now() });
+};
+
+/** 診断用: Firestoreのmaterialsコレクションの実際のドキュメント数を返す */
+export const countMaterialsInFirestore = async (): Promise<number> => {
+    const snap = await getCountFromServer(collection(db, COLLECTIONS.MATERIALS));
+    return snap.data().count;
+};
+
+/**
+ * 重複資材を削除する。
+ * name + model + dimensions + category が完全一致するものを重複とみなし、
+ * updatedAt が最新のものだけ残して残りを削除する。
+ *
+ * 【安全ガード】
+ * - model と dimensions がどちらも空の場合は「情報不足」とみなし重複判定から除外する
+ *   （品名だけ同じ別規格が誤削除されるリスクを防ぐ）
+ * - 削除対象が 50 件を超える場合は呼び出し元で確認を求めること
+ * 削除件数を返す。
+ */
+export const deduplicateMaterials = async (items: Material[]): Promise<number> => {
+    // 重複グループをまとめる
+    const groups = new Map<string, Material[]>();
+    for (const item of items) {
+        const name  = (item.name  || '').trim();
+        const model = (item.model || '').trim();
+        const dims  = (item.dimensions || '').trim();
+        const cat   = (item.category   || '').trim();
+
+        // 品名が空、または model・dimensions が両方空の場合は重複判定しない
+        // （寸法で区別される規格品が誤削除されるのを防ぐ）
+        if (!name || (!model && !dims)) continue;
+
+        const key = [name, model, dims, cat].join('||');
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(item);
+    }
+
+    // 重複があるグループから「最新以外」のIDを収集
+    const idsToDelete: string[] = [];
+    for (const group of groups.values()) {
+        if (group.length <= 1) continue;
+        // updatedAt が大きい（新しい）順に並べ、先頭1件を残して残りを削除対象に
+        group.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        idsToDelete.push(...group.slice(1).map(i => i.id));
+    }
+
+    if (idsToDelete.length === 0) return 0;
+
+    // 500件ずつバッチ削除
+    const CHUNK = 499;
+    for (let i = 0; i < idsToDelete.length; i += CHUNK) {
+        const chunk = idsToDelete.slice(i, i + CHUNK);
+        const batch = writeBatch(db);
+        chunk.forEach(id => batch.delete(doc(db, COLLECTIONS.MATERIALS, id)));
+        await batch.commit();
+    }
+
+    return idsToDelete.length;
 };
