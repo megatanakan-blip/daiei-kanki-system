@@ -275,21 +275,31 @@ const SlipPage: React.FC<{
                                         <tr className="h-10 text-center text-sm font-mono font-bold">
                                             <td className="border-r border-slate-300 px-1 relative">
                                                 <input
-                                                    type="number"
-                                                    value={prevAmt}
-                                                    onChange={(e) => onUpdateSlip?.({ previousBillingAmount: parseInt(e.target.value) || 0 })}
-                                                    onWheel={e => (e.target as HTMLElement).blur()}
-                                                    className="w-full text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-1 print:hidden no-spin-buttons"
+                                                    type="text"
+                                                    inputMode="numeric"
+                                                    value={prevAmt.toLocaleString()}
+                                                    onChange={(e) => {
+                                                        const val = e.target.value.replace(/,/g, '');
+                                                        if (/^\d*$/.test(val)) {
+                                                            onUpdateSlip?.({ previousBillingAmount: parseInt(val) || 0 });
+                                                        }
+                                                    }}
+                                                    className="w-full text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-1 print:hidden font-mono font-bold"
                                                 />
                                                 <span className="hidden print:block">¥{prevAmt.toLocaleString()}</span>
                                             </td>
                                             <td className="border-r border-slate-300 px-1 relative">
                                                 <input
-                                                    type="number"
-                                                    value={payRec}
-                                                    onChange={(e) => onUpdateSlip?.({ paymentReceived: parseInt(e.target.value) || 0 })}
-                                                    onWheel={e => (e.target as HTMLElement).blur()}
-                                                    className="w-full text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-1 print:hidden no-spin-buttons"
+                                                    type="text"
+                                                    inputMode="numeric"
+                                                    value={payRec.toLocaleString()}
+                                                    onChange={(e) => {
+                                                        const val = e.target.value.replace(/,/g, '');
+                                                        if (/^\d*$/.test(val)) {
+                                                            onUpdateSlip?.({ paymentReceived: parseInt(val) || 0 });
+                                                        }
+                                                    }}
+                                                    className="w-full text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-1 print:hidden font-mono font-bold"
                                                 />
                                                 <span className="hidden print:block">¥{payRec.toLocaleString()}</span>
                                             </td>

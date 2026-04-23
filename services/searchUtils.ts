@@ -1,5 +1,9 @@
 
-import { MaterialItem } from '../types';
+import { MaterialItem, PricingRule } from '../types';
+
+// 高速化のためのキャッシュ
+const normalizationCache = new Map<string, string>();
+const strictNormalizationCache = new Map<string, string>();
 
 /**
  * Normalizes text for search by:
@@ -7,10 +11,12 @@ import { MaterialItem } from '../types';
  * 2. Converting Full-width alphanumeric characters to Half-width
  * 3. Converting Half-width Katakana to Full-width Katakana
  * 4. Converting to lowercase
- * 5. Trimming whitespace
+ * 5. Normalizing dashes and hyphens
+ * 6. Trimming whitespace
  */
 export const normalizeForSearch = (text: string): string => {
     if (!text) return '';
+    if (normalizationCache.has(text)) return normalizationCache.get(text)!;
     
     let normalized = text.trim();
 
@@ -39,166 +45,133 @@ export const normalizeForSearch = (text: string): string => {
         'ﾜ': 'ワ', 'ｦ': 'ヲ', 'ﾝ': 'ン',
         'ｧ': 'ァ', 'ｨ': 'ィ', 'ｩ': 'ゥ', 'ｪ': 'ェ', 'ｫ': 'ォ',
         'ｯ': 'ッ', 'ｬ': 'ャ', 'ｭ': 'ュ', 'ｮ': 'ョ',
-        'ﾞ': '゛', 'ﾟ': '゜', 'ｰ': 'ー', ' ': '　'
+        'ﾞ': '゛', 'ﾟ': '゜', 'ｰ': 'ー'
     };
-    normalized = normalized.split('').map(char => kanaMap[char] || char).join('');
+    normalized = normalized.replace(/[ｦ-ﾟ]/g, (match) => kanaMap[match] || match);
 
-    // Handle voiced/semi-voiced sounds in half-width (simplified approach)
+    // 4. Combining Dakuten/Handakuten
     normalized = normalized.replace(/カ゛/g, 'ガ').replace(/キ゛/g, 'ギ').replace(/ク゛/g, 'グ').replace(/ケ゛/g, 'ゲ').replace(/コ゛/g, 'ゴ')
-        .replace(/サ゛/g, 'ザ').replace(/シ゛/g, 'ジ').replace(/ス゛/g, 'ズ').replace(/セ゛/g, 'ゼ').replace(/ソ゛/g, 'ゾ')
-        .replace(/タ゛/g, 'ダ').replace(/チ゛/g, 'ヂ').replace(/ツ゛/g, 'ヅ').replace(/テ゛/g, 'デ').replace(/ト゛/g, 'ド')
-        .replace(/ハ゛/g, 'バ').replace(/ヒ゛/g, 'ビ').replace(/フ゛/g, 'ブ').replace(/ヘ゛/g, 'ベ').replace(/ホ゛/g, 'ボ')
-        .replace(/ハ゜/g, 'パ').replace(/ヒ゜/g, 'ピ').replace(/フ゜/g, 'プ').replace(/ヘ゜/g, 'ペ').replace(/ホ゜/g, 'ポ');
+                           .replace(/サ゛/g, 'ザ').replace(/シ゛/g, 'ジ').replace(/ス゛/g, 'ズ').replace(/セ゛/g, 'ゼ').replace(/ソ゛/g, 'ゾ')
+                           .replace(/タ゛/g, 'ダ').replace(/チ゛/g, 'ヂ').replace(/ツ゛/g, 'ヅ').replace(/テ゛/g, 'デ').replace(/ト゛/g, 'ド')
+                           .replace(/ハ゛/g, 'バ').replace(/ヒ゛/g, 'ビ').replace(/フ゛/g, 'ブ').replace(/ヘ゛/g, 'ベ').replace(/ホ゛/g, 'ボ')
+                           .replace(/ハ゜/g, 'パ').replace(/ヒ゜/g, 'ピ').replace(/フ゜/g, 'プ').replace(/ヘ゜/g, 'ペ').replace(/ホ゜/g, 'ポ')
+                           .replace(/ウ゛/g, 'ヴ');
 
-    // 4. Lowercase
+    // 5. Lowercase
     normalized = normalized.toLowerCase();
 
-    // 5. Replace full-width space with half-width and collapse multiple spaces for consistency
+    // 6. Unify hyphens/dashes to "-"
+    normalized = normalized.replace(/[ーｰ－‐‑‒–—―⁃－-]/g, '-');
+
+    // 7. Space normalization
     normalized = normalized.replace(/　/g, ' ');
     normalized = normalized.replace(/\s+/g, ' ');
 
-    return normalized.trim();
+    const result = normalized.trim();
+    normalizationCache.set(text, result);
+    return result;
 };
 
-export const calculateRelevanceScore = (item: MaterialItem, keywords: string[]): number => {
-    if (keywords.length === 0) return 0;
+const strictNorm = (s: string): string => {
+    if (!s) return '';
+    if (strictNormalizationCache.has(s)) return strictNormalizationCache.get(s)!;
 
-    let totalScore = 0;
-
-    const fields = {
-        name: normalizeForSearch(item.name || ''),
-        model: normalizeForSearch(item.model || ''),
-        dimensions: normalizeForSearch(item.dimensions || ''),
-        manufacturer: normalizeForSearch(item.manufacturer || ''),
-        category: normalizeForSearch(item.category || ''),
-        location: normalizeForSearch(item.location || '')
-    };
-
-    // 1. AND filter logic (MUST match all keywords somewhere)
-    const matchesAll = keywords.every(k => 
-        fields.name.includes(k) || 
-        fields.model.includes(k) || 
-        fields.dimensions.includes(k) || 
-        fields.manufacturer.includes(k) || 
-        fields.category.includes(k) ||
-        fields.location.includes(k)
-    );
-
-    if (!matchesAll) return -1;
-
-    // 2. Full query match boost (across name, model, dimensions)
-    const combinedKeyFields = `${fields.name} ${fields.model} ${fields.dimensions}`.trim();
-    const fullQuery = keywords.join(' ');
-    if (combinedKeyFields === fullQuery) totalScore += 10000;
-    else if (combinedKeyFields.startsWith(fullQuery)) totalScore += 5000;
-
-    keywords.forEach((k, idx) => {
-        // Higher weight for the first keyword
-        const multiplier = idx === 0 ? 2 : 1;
-
-        // 3. Exact matches (Absolute priority)
-        if (fields.model === k) totalScore += 5000 * multiplier;
-        if (fields.dimensions === k) totalScore += 4000 * multiplier;
-        if (fields.name === k) totalScore += 3000 * multiplier;
-
-        // 4. Boundary matches (e.g., "S" matches "モルコ S" as a word)
-        const boundaryRegex = new RegExp(`(^|\\s|[-/])${k}($|\\s|[-/])`, 'i');
-        if (boundaryRegex.test(fields.model)) totalScore += 1000 * multiplier;
-        if (boundaryRegex.test(fields.dimensions)) totalScore += 800 * multiplier;
-        if (boundaryRegex.test(fields.name)) totalScore += 600 * multiplier;
-
-        // 5. Starts-with matches
-        if (fields.model.startsWith(k)) totalScore += 500 * multiplier;
-        if (fields.dimensions.startsWith(k)) totalScore += 400 * multiplier;
-        if (fields.name.startsWith(k)) totalScore += 300 * multiplier;
-        if (fields.manufacturer.startsWith(k)) totalScore += 100 * multiplier;
-
-        // 6. Basic presence
-        if (fields.name.includes(k)) totalScore += 50;
-        if (fields.model.includes(k)) totalScore += 40;
-        if (fields.dimensions.includes(k)) totalScore += 30;
-        if (fields.manufacturer.includes(k)) totalScore += 20;
-        if (fields.category.includes(k)) totalScore += 10;
-        if (fields.location.includes(k)) totalScore += 5;
-    });
-
-    return totalScore;
+    let n = normalizeForSearch(s);
+    // Remove corporate suffixes
+    n = n.replace(/株式会社|有限会社|合同会社|合資会社|合名会社|（株）|\(株\)|㈱|（有）|\(有\)|㈲|（合）|（名）/g, '');
+    // Remove all non-alphanumeric/Japanese characters
+    const result = n.replace(/[^a-zA-Z0-9\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/g, '');
+    strictNormalizationCache.set(s, result);
+    return result;
 };
 
-const naturalCompare = (a: string, b: string): number => {
-    // 設備業界の寸法記号（A, W, インチ分数など）を考慮した自然順序ソート
-    const ax: any[] = [];
-    const bx: any[] = [];
-
-    // 数値と非数値の境界で分割して配列化
-    a.replace(/(\d+)|(\D+)/g, (_, $1, $2) => { ax.push([$1 || Infinity, $2 || ""]); return ""; });
-    b.replace(/(\d+)|(\D+)/g, (_, $1, $2) => { bx.push([$1 || Infinity, $2 || ""]); return ""; });
-
-    while (ax.length && bx.length) {
-        const an = ax.shift();
-        const bn = bx.shift();
-        const nn = an[0] - bn[0] || an[1].localeCompare(bn[1]);
-        if (nn) return nn;
-    }
-
-    return ax.length - bx.length;
-};
-
-export const filterAndSortItems = (items: MaterialItem[], query: string): MaterialItem[] => {
-    const normalizedQuery = normalizeForSearch(query);
-    const keywords = normalizedQuery.split(' ').filter(k => k.length > 0);
-    if (keywords.length === 0) return items;
-
-    return items
-        .map(item => ({ item, score: calculateRelevanceScore(item, keywords) }))
-        .filter(result => result.score >= 0)
-        .sort((a, b) => {
-            // 1. スコア順（検索クエリとの関連性）
-            if (b.score !== a.score) return b.score - a.score;
-            
-            // 2. スコアが同じなら「寸法(dimensions)」フィールドで自然順序ソート
-            return naturalCompare(a.item.dimensions || "", b.item.dimensions || "");
-        })
-        .map(result => result.item);
-};
+// Cache for customer-specific rules to avoid repeated filtering
+let lastPricingRules: PricingRule[] | null = null;
+let customerRulesCache = new Map<string, PricingRule[]>();
 
 /**
- * 顧客・現場別の単価ルールを適用した価格を算出します
+ * Calculates applied price based on customer and site rules.
+ * Optimized for high performance with caching.
  */
-export const getAppliedPrice = (item: MaterialItem, activeCustomer: string | null, activeSite: string | null, pricingRules: any[]): number => {
+export const getAppliedPrice = (item: MaterialItem, activeCustomer: string | null, activeSite: string | null, pricingRules: PricingRule[]): number => {
     const basePrice = item.sellingPrice || 0;
-    if (!activeCustomer) return basePrice;
+    if (!activeCustomer || !pricingRules || pricingRules.length === 0) return basePrice;
 
-    const normCust = normalizeForSearch(activeCustomer);
-    const customerRules = pricingRules.filter(r => normalizeForSearch(r.customerName) === normCust);
+    // Clear cache if the source rules array has changed
+    if (pricingRules !== lastPricingRules) {
+        customerRulesCache.clear();
+        normalizationCache.clear();
+        strictNormalizationCache.clear();
+        lastPricingRules = pricingRules;
+    }
+
+    // Pre-filter rules for the current customer (cached)
+    let customerRules = customerRulesCache.get(activeCustomer);
+    if (!customerRules) {
+        const normCust = normalizeForSearch(activeCustomer);
+        customerRules = pricingRules.filter(r => normalizeForSearch(r.customerName) === normCust);
+
+        if (customerRules.length === 0) {
+            const sc = strictNorm(activeCustomer);
+            customerRules = pricingRules.filter(r => strictNorm(r.customerName) === sc);
+        }
+        customerRulesCache.set(activeCustomer, customerRules);
+    }
+
     if (customerRules.length === 0) return basePrice;
 
-    const findBestRule = (scopeRules: any[]) => {
-        // 1. 資材IDでの完全一致 (最優先)
+    const findBestRule = (scopeRules: PricingRule[]) => {
+        // 1. Exact Material ID Match
         let r = scopeRules.find(r => r.materialId === item.id);
         if (r) return r;
 
-        // 2. カテゴリー + 型式での一致
+        // 2. Name + Category + Model Match (for duplicate items)
+        const normName = normalizeForSearch(item.name);
+        const normCat = normalizeForSearch(item.category);
+        const normModel = normalizeForSearch(item.model || '');
+        r = scopeRules.find(r => 
+            normalizeForSearch(r.materialName || '') === normName &&
+            normalizeForSearch(r.category) === normCat &&
+            normalizeForSearch(r.model || '') === normModel
+        );
+        if (r) return r;
+
+        // 3. Category + Model Match
         if (item.model) {
-            r = scopeRules.find(r => r.category === item.category && r.model === item.model && !r.materialId);
+            r = scopeRules.find(r => 
+                normalizeForSearch(r.category) === normCat && 
+                normalizeForSearch(r.model || '') === normModel && 
+                !r.materialId
+            );
             if (r) return r;
         }
 
-        // 3. カテゴリー全体での一致 (model: 'All')
-        r = scopeRules.find(r => r.category === item.category && r.model === 'All' && !r.materialId);
+        // 4. Category Match (model: 'All')
+        r = scopeRules.find(r => 
+            normalizeForSearch(r.category) === normCat && 
+            (!r.model || r.model === 'All' || r.model === '') && 
+            !r.materialId
+        );
         return r;
     };
 
-    // 優先順位: 1. 現場別ルール 2. 顧客共通ルール
-    let rule: any;
-    if (activeSite && activeSite !== '') {
+    // Site common check
+    const isCommonSite = (siteName: string | undefined | null) => {
+        if (!siteName) return true;
+        const norm = normalizeForSearch(siteName);
+        return norm === '' || norm === 'キョウツウ' || norm === 'ゼンゲンジャウキョウツウ' || norm === 'イッパン';
+    };
+
+    // Priority: 1. Site-specific rule, 2. Customer-common rule
+    let rule: PricingRule | undefined;
+    if (activeSite && activeSite !== '' && !isCommonSite(activeSite)) {
         const normSite = normalizeForSearch(activeSite);
-        const siteRules = customerRules.filter(r => normalizeForSearch(r.siteName || '') === normSite);
+        const siteRules = customerRules.filter(r => !isCommonSite(r.siteName) && normalizeForSearch(r.siteName || '') === normSite);
         rule = findBestRule(siteRules);
     }
 
     if (!rule) {
-        const commonRules = customerRules.filter(r => !r.siteName || r.siteName === '');
+        const commonRules = customerRules.filter(r => isCommonSite(r.siteName));
         rule = findBestRule(commonRules);
     }
 
@@ -213,4 +186,45 @@ export const getAppliedPrice = (item: MaterialItem, activeCustomer: string | nul
     }
 
     return basePrice;
+};
+
+/**
+ * Filter and sort items based on multiple search terms.
+ * Optimized with caching.
+ */
+export const filterAndSortItems = (items: MaterialItem[], searchTerms: string): MaterialItem[] => {
+    if (!searchTerms.trim()) return items;
+
+    const terms = searchTerms.split(/\s+/).map(t => normalizeForSearch(t)).filter(t => t.length > 0);
+    
+    return items
+        .filter(item => {
+            const name = normalizeForSearch(item.name);
+            const category = normalizeForSearch(item.category);
+            const model = normalizeForSearch(item.model || '');
+            const maker = normalizeForSearch(item.maker || '');
+            const number = normalizeForSearch(item.shelfNumber || '');
+            
+            return terms.every(term => 
+                name.includes(term) || 
+                category.includes(term) || 
+                model.includes(term) || 
+                maker.includes(term) || 
+                number.includes(term)
+            );
+        })
+        .sort((a, b) => {
+            // Priority matches for first term
+            const firstTerm = terms[0];
+            const aName = normalizeForSearch(a.name);
+            const bName = normalizeForSearch(b.name);
+            
+            const aStarts = aName.startsWith(firstTerm);
+            const bStarts = bName.startsWith(firstTerm);
+            
+            if (aStarts && !bStarts) return -1;
+            if (!aStarts && bStarts) return 1;
+            
+            return aName.localeCompare(bName);
+        });
 };

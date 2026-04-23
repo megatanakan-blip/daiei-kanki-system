@@ -476,7 +476,6 @@ const App: React.FC = () => {
                         onAddToCart={aiItems => {
                             const slipItems: SlipItem[] = aiItems.map(ni => {
                                 const master = items.find(i => i.id === ni.id);
-                                // 顧客・現場ルールを適用した最新単価を算出
                                 const price = master ? getAppliedPrice(master, activeCustomer, activeSite, pricingRules) : (ni.appliedPrice || 0);
                                 return {
                                     ...ni,

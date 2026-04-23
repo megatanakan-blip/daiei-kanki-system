@@ -1,6 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { PricingRule, MaterialItem, Customer, MATERIAL_CATEGORIES } from '../types';
+import { normalizeForSearch } from '../services/searchUtils';
 // Fixed: Added missing Loader2 import from lucide-react
 import { Plus, Trash2, X, Users, Tag, ArrowLeft, ChevronDown, ChevronRight, CheckSquare, Square, Save, UserCheck, Layers, Search, MapPin, AlertCircle, Loader2, Edit3 } from 'lucide-react';
 import * as storage from '../services/firebaseService';
@@ -72,14 +73,16 @@ export const PricingManager = ({ rules, customers, items, onClose }: PricingMana
     const referenceRules = useMemo(() => {
         if (targetCustomers.length === 0) return [];
         const firstCust = targetCustomers[0];
-        return rules.filter(r => r.customerName === firstCust.name);
+        const normName = normalizeForSearch(firstCust.name);
+        return rules.filter(r => normalizeForSearch(r.customerName) === normName);
     }, [rules, targetCustomers]);
 
     const existingSites = useMemo(() => {
         if (targetCustomers.length === 0) return [];
         const sites = new Set<string>();
         rules.forEach(r => {
-            if (targetCustomers.some(c => c.name === r.customerName) && r.siteName) {
+            const normRN = normalizeForSearch(r.customerName);
+            if (targetCustomers.some(c => normalizeForSearch(c.name) === normRN) && r.siteName) {
                 sites.add(r.siteName);
             }
         });
@@ -175,10 +178,12 @@ export const PricingManager = ({ rules, customers, items, onClose }: PricingMana
         setIsSaving(true);
         try {
             // 現在の表示対象顧客の、対象現場名のルールをすべて抽出
-            const rulesToUpdate = rules.filter(r => 
-                targetCustomers.some(c => c.name === r.customerName) && 
-                (r.siteName === (oldName === 'BASE_COMMON' ? '' : oldName))
-            );
+            const rulesToUpdate = rules.filter(r => {
+                const normRN = normalizeForSearch(r.customerName);
+                const isTargetCust = targetCustomers.some(c => normalizeForSearch(c.name) === normRN);
+                const isTargetSite = (normalizeForSearch(r.siteName || '') === normalizeForSearch(oldName === 'BASE_COMMON' ? '' : oldName));
+                return isTargetCust && isTargetSite;
+            });
 
             await Promise.all(rulesToUpdate.map(r => 
                 storage.updatePricingRule(r.id, { siteName: nextName })
@@ -202,11 +207,27 @@ export const PricingManager = ({ rules, customers, items, onClose }: PricingMana
         if (!editingCustomer || !editName.trim()) return;
         setIsSaving(true);
         try {
+            const oldCust = customers.find(c => c.id === editingCustomer);
+            const nextName = editName.trim();
+
             await storage.updateCustomer(editingCustomer, {
-                name: editName.trim(),
+                name: nextName,
                 email: editEmail.trim(),
                 closingDay: editClosingDay
             });
+
+            // 顧客名が変更された場合、関連する単価ルールの顧客名も一括更新する
+            if (oldCust && normalizeForSearch(oldCust.name) !== normalizeForSearch(nextName)) {
+                const normOldName = normalizeForSearch(oldCust.name);
+                const rulesToUpdate = rules.filter(r => normalizeForSearch(r.customerName) === normOldName);
+                
+                if (rulesToUpdate.length > 0) {
+                    await Promise.all(rulesToUpdate.map(r => 
+                        storage.updatePricingRule(r.id, { customerName: nextName })
+                    ));
+                }
+            }
+
             setEditingCustomer(null);
         } catch (err) {
             alert('顧客情報の更新に失敗しました');
