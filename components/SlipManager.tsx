@@ -1500,7 +1500,23 @@ export const SlipManager: React.FC<{
                 siteMap.get(currentSiteKey)!.push(s);
             }
         });
-        return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+
+        // 顧客名を昇順でソートし、さらに各現場内の伝票を「日付が新しい順（降順）」でソート
+        return Array.from(map.entries())
+            .sort((a, b) => a[0].localeCompare(b[0]))
+            .map(([cName, siteMap]) => {
+                // 現場内の伝票リストをソート
+                const sortedSiteEntries = Array.from(siteMap.entries()).map(([sName, slipList]) => {
+                    const sortedList = [...slipList].sort((a, b) => {
+                        // 1. 日付で比較 (新しい順)
+                        if (a.date !== b.date) return b.date.localeCompare(a.date);
+                        // 2. 日付が同じなら伝票番号で比較 (大きい順)
+                        return (b.slipNumber || '').localeCompare(a.slipNumber || '');
+                    });
+                    return [sName, sortedList] as [string, Slip[]];
+                });
+                return [cName, new Map(sortedSiteEntries)] as [string, Map<string, Slip[]>];
+            });
     }, [archivedSlips, historySearchQuery, targetMonth, customers]);
 
     const tabs = editingSlipId
