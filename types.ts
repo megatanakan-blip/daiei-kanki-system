@@ -134,6 +134,10 @@ export interface Slip {
   paymentReceived?: number;       // 今回御入金額
   carriedForwardAmount?: number;  // 繰越残高
   isReviewed?: boolean;           // 伝票確認済みフラグ
+  // 分割表示用
+  documentTotal?: number;
+  documentTax?: number;
+  documentGrandTotal?: number;
 }
 
 export type EstimateStatus = 'pending' | 'accepted' | 'rejected' | 'converted';

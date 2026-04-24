@@ -146,6 +146,29 @@ const getSlipLabel = (type: SlipType, constructionName?: string) => {
     }
 };
 
+const splitSlipIntoPages = (slip: Slip): Slip[] => {
+    if (!slip.items || slip.items.length <= 16) return [{ ...slip, documentTotal: slip.totalAmount, documentTax: slip.taxAmount, documentGrandTotal: slip.grandTotal }];
+    const pages: Slip[] = [];
+    const totalNet = slip.items.reduce((acc, i) => acc + ((i.appliedPrice || 0) * (i.deliveredQuantity ?? i.quantity)), 0);
+    const totalTax = Math.round(totalNet * 0.1);
+    const totalGrand = totalNet + totalTax;
+
+    for (let i = 0; i < slip.items.length; i += 16) {
+        const chunk = slip.items.slice(i, i + 16);
+        const chunkNet = chunk.reduce((acc, i) => acc + ((i.appliedPrice || 0) * (i.deliveredQuantity ?? i.quantity)), 0);
+        pages.push({
+            ...slip,
+            id: `${slip.id || generateId()}-pg${Math.floor(i / 16) + 1}`,
+            items: chunk,
+            totalAmount: chunkNet,
+            documentTotal: totalNet,
+            documentTax: totalTax,
+            documentGrandTotal: totalGrand
+        });
+    }
+    return pages;
+};
+
 const DeliveryTimeLabels: Record<DeliveryTime, string> = {
     morning_first: '朝一番', am: '午前中', afternoon_first: '昼一番', pm: '午後', none: '指定なし'
 };
@@ -174,24 +197,18 @@ const SlipPage: React.FC<{
     const isInvoice = slip.type === 'invoice';
     const isDetail = isInvoice || isDelivery;
 
-    // 最新の単価設定を考慮して、表示用の合計金額を（必要であれば）再計算
-    const currentSlipTotal = useMemo(() => {
-        if (!slip.items || slip.items.length === 0) return slip.totalAmount || 0;
-        // 請求書・納品書として発行済みのものは、保存された合計金額をそのまま使用する
-        if ((isInvoice || isDelivery) && (slip.totalAmount !== undefined && slip.totalAmount !== 0)) {
-            return slip.totalAmount;
-        }
-        // それ以外（仮納品書など）は、個々のアイテムの金額を合算する
-        return slip.items.reduce((acc, item) => {
+    // 表示している16件分のみの合計金額（縦計算用）
+    const pageItems = useMemo(() => slip.items?.slice(0, 16) || [], [slip.items]);
+    const pageTotal = useMemo(() => {
+        return pageItems.reduce((acc, item) => {
             return acc + ((item.appliedPrice || 0) * (item.deliveredQuantity ?? item.quantity));
         }, 0);
-    }, [slip, pricingRules, isInvoice, isDelivery, forceDisplayPrice]);
+    }, [pageItems]);
 
-    // 内部計算用の値を抽出
     const prevAmt = slip.previousBillingAmount || 0;
     const payRec = slip.paymentReceived || 0;
     const carriedForward = prevAmt - payRec;
-    const currentSales = currentSlipTotal;
+    const currentSales = isCover ? (slip.totalAmount || 0) : pageTotal;
     const currentTax = Math.round(currentSales * 0.1);
     const currentGrandTotal = carriedForward + currentSales + currentTax;
 
@@ -384,7 +401,7 @@ const SlipPage: React.FC<{
         <div className="bg-white pt-8 pb-6 px-10 text-slate-900 flex flex-col justify-between h-full w-full box-border">
             <div className="flex-1 overflow-hidden flex flex-col">
                 <div className="flex justify-between items-end border-b-2 border-slate-900 pb-2 mb-3">
-                    <h1 className={`text-2xl font-serif font-bold tracking-widest ${isReturn ? 'text-red-700' : ''}`}>{getSlipLabel(slip.type, slip.constructionName)}</h1>
+                    <h1 className={`text-2xl font-serif font-bold tracking-widest ${(isReturn && !isInvoice) ? 'text-red-700' : ''}`}>{getSlipLabel(slip.type, slip.constructionName)}</h1>
                     <div className="text-right font-mono text-xs">
                         <p className="font-bold">No. {slip.slipNumber || 'PENDING'}</p>
                         <div className="flex items-center justify-end gap-1">
@@ -495,12 +512,15 @@ const SlipPage: React.FC<{
                         <div className="border-2 border-slate-800 p-2 bg-slate-50 min-w-[200px] shadow-sm">
                             {isDetail ? (
                                 <div className="space-y-1">
-                                    <div className="flex justify-between text-base pt-1 font-black text-slate-900"><span className="text-slate-700">税抜合計金額 (10%対象)</span><span className="font-mono underline underline-offset-2 decoration-double decoration-slate-900">¥{currentSales.toLocaleString()}</span></div>
+                                    <div className="flex justify-between text-base pt-1 font-black text-slate-900">
+                                        <span className="text-slate-700">税抜合計金額 (10%対象)</span>
+                                        <span className="font-mono underline underline-offset-2 decoration-double decoration-slate-900">¥{pageTotal.toLocaleString()}</span>
+                                    </div>
                                 </div>
                             ) : (
                                 <>
                                     <div className="text-center font-bold text-[8px] border-b border-slate-300 pb-1 mb-1 text-slate-500 uppercase tracking-widest">御計算金額 (税抜)</div>
-                                    <div className="text-xl font-mono font-black text-center">{currentSales < 0 ? `▲¥${Math.abs(currentSales).toLocaleString()}` : `¥${currentSales.toLocaleString()}`}</div>
+                                    <div className="text-xl font-mono font-black text-center">{pageTotal < 0 ? `▲¥${Math.abs(pageTotal).toLocaleString()}` : `¥${pageTotal.toLocaleString()}`}</div>
                                 </>
                             )}
                         </div>
@@ -1209,7 +1229,7 @@ export const SlipManager: React.FC<{
                     orderingPerson, customerOrderNumber, receivingPerson, type: activeMode === 'return' ? 'return' : 'outbound', isClosed: activeMode === 'return'
                 };
                 const newId = await storage.addSlip(cleanForFirestore(newSlip));
-                setPrintingSlips([{ ...newSlip, id: newId } as Slip]);
+                setPrintingSlips(splitSlipIntoPages({ ...newSlip, id: newId } as Slip));
                 onClearCart();
                 handleTabChange(activeMode === 'return' ? 'history' : 'pending');
             }
@@ -1288,7 +1308,7 @@ export const SlipManager: React.FC<{
             setConfirmingOutbound(null);
             setIssuerName('');
             handleTabChange(missingItems.length > 0 ? 'reslip' : 'pending');
-            setPrintingSlips([{ ...provSlip, id: generateId() } as Slip]);
+            setPrintingSlips(splitSlipIntoPages({ ...provSlip, id: generateId() } as Slip));
         } finally { setIsSaving(false); }
     };
 
@@ -1397,14 +1417,17 @@ export const SlipManager: React.FC<{
                 const dNet = dItems.reduce((acc, b) => acc + ((b.appliedPrice || 0) * (b.deliveredQuantity || 0)), 0);
                 const dTax = Math.round(dNet * 0.1);
                 for (let i = 0; i < dItems.length; i += 16) {
+                    const chunk = dItems.slice(i, i + 16);
+                    const chunkNet = chunk.reduce((acc, b) => acc + ((b.appliedPrice || 0) * (b.deliveredQuantity || 0)), 0);
                     allDocs.push({
                         ...baseMeta,
                         id: `delivery-${sName}-${date}-${i}`,
                         type: 'delivery',
-                        items: dItems.slice(i, i + 16) as SlipItem[],
-                        totalAmount: dNet,
-                        taxAmount: dTax,
-                        grandTotal: dNet + dTax,
+                        items: chunk as SlipItem[],
+                        totalAmount: chunkNet,
+                        documentTotal: dNet,
+                        documentTax: dTax,
+                        documentGrandTotal: dNet + dTax,
                         date: date,
                         slipNumber: `DLV-${date.replace(/-/g, '')}${i > 0 ? `-${i/16 + 1}` : ''}`
                     });
@@ -1414,11 +1437,16 @@ export const SlipManager: React.FC<{
             // 請求明細書 (一覧形式維持)
             for (let i = 0; i < sItems.length; i += 16) {
                 const chunk = sItems.slice(i, i + 16);
+                const chunkNet = chunk.reduce((acc, b) => acc + ((b.appliedPrice || 0) * (b.deliveredQuantity || 0)), 0);
                 allDocs.push({
                     ...baseMeta,
                     id: `invoice-${sName}-${i}`,
                     type: 'invoice',
                     items: chunk,
+                    totalAmount: chunkNet,
+                    documentTotal: sNet,
+                    documentTax: sTax,
+                    documentGrandTotal: sNet + sTax,
                     slipNumber: `${siteSlipNo}-I${i / 16 + 1}`
                 });
             }
@@ -2093,7 +2121,7 @@ export const SlipManager: React.FC<{
                                                                         >
                                                                             {sl.isReviewed ? <CheckSquare size={18} /> : <Square size={18} />}
                                                                         </button>
-                                                                        <button onClick={() => { setPrintingSlips([sl]); }} className="p-2.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all" title="再印刷">
+                                                                        <button onClick={() => { setPrintingSlips(splitSlipIntoPages(sl)); }} className="p-2.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all" title="再印刷">
                                                                             <Printer size={18} />
                                                                         </button>
                                                                         {(sl.type === 'provisional' || sl.type === 'return') && (
@@ -2150,7 +2178,7 @@ export const SlipManager: React.FC<{
                                                 <button onClick={() => { setConfirmingOutbound(s); setActualQuantities(s.items.reduce((a, v, idx) => ({ ...a, [`${v.id}-${idx}`]: v.quantity }), {} as Record<string, number>)); }} className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-700 text-white px-4 md:px-8 py-3 rounded-2xl text-[10px] md:text-[11px] font-black shadow-xl shadow-blue-100 active:scale-95 transition-all uppercase tracking-widest whitespace-nowrap">
                                                     <span className="md:hidden">実数入力</span><span className="hidden md:inline">実数確定して仮納品書発行</span>
                                                 </button>
-                                                <button onClick={() => { setPrintingSlips([s]); }} className="flex-1 md:flex-none bg-white border border-slate-200 px-4 md:px-6 py-3 rounded-2xl text-[10px] md:text-[11px] font-black hover:bg-slate-50 transition-all uppercase tracking-widest whitespace-nowrap">
+                                                <button onClick={() => { setPrintingSlips(splitSlipIntoPages(s)); }} className="flex-1 md:flex-none bg-white border border-slate-200 px-4 md:px-6 py-3 rounded-2xl text-[10px] md:text-[11px] font-black hover:bg-slate-50 transition-all uppercase tracking-widest whitespace-nowrap">
                                                     <span className="md:hidden">プレビュー</span><span className="hidden md:inline">出庫用伝票を印刷</span>
                                                 </button>
                                                 <button onClick={() => handleEditSlip(s)} className="p-3 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-2xl transition-all" title="内容を修正">
