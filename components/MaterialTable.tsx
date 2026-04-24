@@ -248,20 +248,46 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
         const sorted = [...filteredItems];
         if (sortConfig.field) {
             sorted.sort((a, b) => {
-                let aVal: any = a[sortConfig.field as keyof MaterialItem] || '';
-                let bVal: any = b[sortConfig.field as keyof MaterialItem] || '';
-                if (['listPrice', 'costPrice', 'sellingPrice'].includes(sortConfig.field!)) {
-                    const aNum = Number(aVal); const bNum = Number(bVal);
-                    if (aNum !== bNum) return sortConfig.direction === 'asc' ? aNum - bNum : bNum - aNum;
-                } else {
-                    const cmp = naturalCompare(String(aVal), String(bVal));
-                    if (cmp !== 0) return sortConfig.direction === 'asc' ? cmp : -cmp;
+                const compare = (field: SortField): number => {
+                    if (field === 'profitMargin') {
+                        const getVal = (i: MaterialItem) => {
+                            const ap = getAppliedPrice(i, activeCustomer, activeSite, pricingRules);
+                            return ap > 0 ? ((ap - (i.costPrice || 0)) / ap) * 100 : -999;
+                        };
+                        return getVal(a) - getVal(b);
+                    }
+
+                    const aVal = a[field as keyof MaterialItem] || '';
+                    const bVal = b[field as keyof MaterialItem] || '';
+
+                    if (['listPrice', 'costPrice', 'sellingPrice'].includes(field)) {
+                        return Number(aVal || 0) - Number(bVal || 0);
+                    }
+                    return naturalCompare(String(aVal), String(bVal));
+                };
+
+                // 1. メインのソート項目
+                let cmp = compare(sortConfig.field);
+                if (cmp !== 0) return sortConfig.direction === 'asc' ? cmp : -cmp;
+
+                // 2. タイブレーク：品名
+                if (sortConfig.field !== 'name') {
+                    cmp = naturalCompare(a.name, b.name);
+                    if (cmp !== 0) return cmp;
                 }
-                return 0;
+
+                // 3. タイブレーク：型式
+                if (sortConfig.field !== 'model') {
+                    cmp = naturalCompare(a.model || '', b.model || '');
+                    if (cmp !== 0) return cmp;
+                }
+
+                // 4. タイブレーク：寸法
+                return naturalCompare(a.dimensions || '', b.dimensions || '');
             });
         }
         return sorted;
-    }, [filteredItems, sortConfig]);
+    }, [filteredItems, sortConfig, activeCustomer, activeSite, pricingRules]);
 
     const allVisibleIds = sortedItems.map(i => i.id);
     const isAllSelected = allVisibleIds.length > 0 && allVisibleIds.every(id => selectedIds.has(id));
@@ -341,8 +367,8 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
                                     <input value={filters.location} onChange={e => setFilters({ ...filters, location: e.target.value })} placeholder="棚番号..." className="w-20 px-2 py-1 text-xs border rounded bg-slate-50 focus:bg-white outline-none focus:ring-1 focus:ring-blue-400 font-black text-indigo-600" />
                                 </div>
                             </th>
-                            <th className="p-4 text-[10px] font-black text-slate-400 text-right cursor-pointer hover:text-blue-600" onClick={() => onSort('listPrice')}><div className="flex items-center justify-end gap-1">定価 / 仕入 <SortIcon field="listPrice" config={sortConfig} /></div></th>
-                            <th className="p-4 text-[10px] font-black text-blue-600 text-right">{getPriceLabel()}</th>
+                            <th className="p-4 text-[10px] font-black text-slate-400 text-right cursor-pointer hover:text-blue-600" onClick={() => onSort('listPrice')}><div className="flex items-center justify-end gap-1">定価 / 仕入 / 掛率 <SortIcon field="listPrice" config={sortConfig} /></div></th>
+                            <th className="p-4 text-[10px] font-black text-blue-600 text-right cursor-pointer hover:text-blue-800" onClick={() => onSort('profitMargin')}><div className="flex items-center justify-end gap-1">{getPriceLabel()} / 粗利 <SortIcon field="profitMargin" config={sortConfig} /></div></th>
                             <th className="p-4 w-24"></th>
                         </tr>
                     </thead>
@@ -376,11 +402,24 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
                                     <td className="p-4 text-right">
                                         <div className="text-xs font-bold text-slate-400">定: ¥{item.listPrice?.toLocaleString()}</div>
                                         <div className="text-xs font-black text-slate-600 mt-0.5">仕: ¥{item.costPrice?.toLocaleString()}</div>
+                                        {item.listPrice > 0 && (
+                                            <div className="text-[9px] font-bold text-slate-400 mt-0.5">掛: {((appliedPrice / item.listPrice) * 100).toFixed(1)}%</div>
+                                        )}
                                     </td>
                                     <td className="p-4 text-right">
                                         <div className={`text-sm font-black ${isIndividual ? 'text-blue-600' : 'text-slate-700'}`}>
+                                            <span className="text-[10px] text-slate-400 font-bold mr-1">{activeCustomer ? '適用:' : '標準:'}</span>
                                             ¥{appliedPrice?.toLocaleString()}
                                             {isIndividual && <span className="ml-1 text-[8px] bg-blue-100 px-1 rounded">個別</span>}
+                                        </div>
+                                        {activeCustomer && (
+                                            <div className="text-[10px] font-bold text-slate-400 mt-0.5">
+                                                (標準: ¥{item.sellingPrice?.toLocaleString()})
+                                            </div>
+                                        )}
+                                        <div className="text-[10px] font-bold text-emerald-600 mt-1">
+                                            利: ¥{(appliedPrice - (item.costPrice || 0)).toLocaleString()}
+                                            <span className="ml-1 opacity-70">({appliedPrice > 0 ? (((appliedPrice - (item.costPrice || 0)) / appliedPrice) * 100).toFixed(1) : '0.0'}%)</span>
                                         </div>
                                     </td>
                                     <td className="p-4"><div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => onEdit(item)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all" title="編集"><Edit2 size={16} /></button><button onClick={() => onAddToSlip(item, appliedPrice)} className="p-2 text-blue-500 hover:bg-blue-600 hover:text-white rounded-xl transition-all shadow-sm active:scale-95" title="伝票に追加"><Plus size={18} /></button></div></td>
