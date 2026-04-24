@@ -6,6 +6,48 @@ const normalizationCache = new Map<string, string>();
 const strictNormalizationCache = new Map<string, string>();
 
 /**
+ * Natural comparison function that handles numbers within strings correctly.
+ * Useful for sorting sizes like 15, 20, 25, 100, etc.
+ */
+export const naturalCompare = (a: string, b: string): number => {
+    const extract = (s: string) => {
+        // Normalize text: replace full-width characters and separate numbers from text
+        const normalized = s.replace(/[０-９]/g, (m) => String.fromCharCode(m.charCodeAt(0) - 0xfee0))
+                            .replace(/[×*xＸ]/g, ' x ');
+        
+        // Match numbers and non-number chunks
+        const chunks = normalized.match(/(\d+|\D+)/g) || [];
+        return chunks.map(chunk => {
+            const num = parseInt(chunk, 10);
+            return isNaN(num) ? chunk.toLowerCase() : num;
+        });
+    };
+
+    const chunksA = extract(a);
+    const chunksB = extract(b);
+
+    for (let i = 0; i < Math.max(chunksA.length, chunksB.length); i++) {
+        const valA = chunksA[i];
+        const valB = chunksB[i];
+
+        if (valA === undefined) return -1;
+        if (valB === undefined) return 1;
+
+        if (typeof valA === 'number' && typeof valB === 'number') {
+            if (valA !== valB) return valA - valB;
+        } else if (typeof valA === 'string' && typeof valB === 'string') {
+            const cmp = valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
+            if (cmp !== 0) return cmp;
+        } else {
+            // Numbers come before strings
+            return typeof valA === 'number' ? -1 : 1;
+        }
+    }
+
+    return 0;
+};
+
+/**
  * Normalizes text for search by:
  * 1. Converting Hiragana to Katakana
  * 2. Converting Full-width alphanumeric characters to Half-width
@@ -108,13 +150,12 @@ export const getAppliedPrice = (item: MaterialItem, activeCustomer: string | nul
     // Pre-filter rules for the current customer (cached)
     let customerRules = customerRulesCache.get(activeCustomer);
     if (!customerRules) {
-        const normCust = normalizeForSearch(activeCustomer);
-        customerRules = pricingRules.filter(r => normalizeForSearch(r.customerName) === normCust);
-
-        if (customerRules.length === 0) {
-            const sc = strictNorm(activeCustomer);
-            customerRules = pricingRules.filter(r => strictNorm(r.customerName) === sc);
-        }
+        const sc = strictNorm(activeCustomer);
+        customerRules = pricingRules.filter(r => {
+            const rSc = strictNorm(r.customerName);
+            // 1. 完全一致 2. ルール名が顧客名に含まれる 3. 顧客名がルール名に含まれる
+            return rSc === sc || (rSc.length > 2 && sc.includes(rSc)) || (sc.length > 2 && rSc.includes(sc));
+        });
         customerRulesCache.set(activeCustomer, customerRules);
     }
 
@@ -225,6 +266,10 @@ export const filterAndSortItems = (items: MaterialItem[], searchTerms: string): 
             if (aStarts && !bStarts) return -1;
             if (!aStarts && bStarts) return 1;
             
-            return aName.localeCompare(bName);
+            // 品名だけでなく型式・寸法も含めて比較することで、同名商品のサイズ順ソートを実現
+            const aFull = `${aName} ${normalizeForSearch(a.model || '')} ${normalizeForSearch(a.dimensions || '')}`;
+            const bFull = `${bName} ${normalizeForSearch(b.model || '')} ${normalizeForSearch(b.dimensions || '')}`;
+            
+            return naturalCompare(aFull, bFull);
         });
 };

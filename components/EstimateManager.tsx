@@ -405,7 +405,7 @@ const EstimateEditRow = React.memo(({
             </div>
           </td>
           <td className="text-right border-r">
-            <input type="number" value={item?.quantity ?? ''} onChange={e => onUpdateItem(globalIdx, { quantity: parseFloat(e.target.value) || 0 })}
+            <input type="number" value={item?.quantity === 0 ? '' : (item?.quantity ?? '')} onChange={e => onUpdateItem(globalIdx, { quantity: parseFloat(e.target.value) || 0 })}
               className="w-full text-[10px] px-1 py-0.5 border rounded text-right" placeholder="0" />
           </td>
           <td className="text-center border-r">

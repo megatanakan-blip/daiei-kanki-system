@@ -564,7 +564,7 @@ const App: React.FC = () => {
                                 onCustomerChange={(name) => { setActiveCustomer(name); setActiveSite(null); }} onSiteChange={setActiveSite}
                                 onEdit={item => { setEditingItem(item); setIsFormOpen(true); }} onDelete={id => window.confirm('削除しますか？') && storage.deleteMaterial(id)}
                                 onAddToSlip={(item, price) => {
-                                    setCart(p => [...p, { ...item, quantity: 1, appliedPrice: price }]);
+                                    setCart(p => [...p, { ...item, quantity: 0, appliedPrice: price }]);
                                     setIsMasterViewOpen(false); setSlipManagerInitialTab('create'); setSlipManagerOpen(true);
                                 }}
                                 sortConfig={sortConfig} onSort={(f) => setSortConfig(p => ({ field: f, direction: p.field === f && p.direction === 'asc' ? 'desc' : 'asc' }))}

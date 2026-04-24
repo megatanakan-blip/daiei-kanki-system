@@ -1,5 +1,5 @@
 import React from 'react';
-import { normalizeForSearch, getAppliedPrice } from '../services/searchUtils';
+import { normalizeForSearch, getAppliedPrice, naturalCompare } from '../services/searchUtils';
 import * as storage from '../services/firebaseService';
 import {
     MaterialItem,
@@ -251,12 +251,12 @@ export const MaterialTable: React.FC<MaterialTableProps> = ({
                 let aVal: any = a[sortConfig.field as keyof MaterialItem] || '';
                 let bVal: any = b[sortConfig.field as keyof MaterialItem] || '';
                 if (['listPrice', 'costPrice', 'sellingPrice'].includes(sortConfig.field!)) {
-                    aVal = Number(aVal); bVal = Number(bVal);
+                    const aNum = Number(aVal); const bNum = Number(bVal);
+                    if (aNum !== bNum) return sortConfig.direction === 'asc' ? aNum - bNum : bNum - aNum;
                 } else {
-                    aVal = String(aVal).toLowerCase(); bVal = String(bVal).toLowerCase();
+                    const cmp = naturalCompare(String(aVal), String(bVal));
+                    if (cmp !== 0) return sortConfig.direction === 'asc' ? cmp : -cmp;
                 }
-                if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
-                if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
                 return 0;
             });
         }

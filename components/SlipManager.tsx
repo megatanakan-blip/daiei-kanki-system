@@ -5,7 +5,7 @@ import { Slip, SlipItem, SlipType, DeliveryTime, DeliveryDestination, MaterialIt
 import { X, Trash2, Printer, FileText, ShoppingCart, Save, HardHat, Loader2, Edit3, FileOutput, CheckSquare, Square, Search, MapPin, Clock, Users, Info, RotateCcw, AlertTriangle, ArrowRight, Package, Layers, Check, PlusCircle, Calculator, History, Archive, FileStack, ChevronDown, ChevronRight, Building2, Eye, EyeOff, Calendar, User, UserCheck, Camera, Sparkles, Plus, Minus, MessageSquare, Edit2, LayoutGrid, FileSearch, Database, Mail, GripVertical } from 'lucide-react';
 import * as storage from '../services/firebaseService';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
-import { normalizeForSearch, filterAndSortItems, getAppliedPrice } from '../services/searchUtils';
+import { normalizeForSearch, filterAndSortItems, getAppliedPrice, naturalCompare } from '../services/searchUtils';
 import { parseReturnMemo } from '../services/geminiService';
 
 import { AppSettings } from '../types';
@@ -177,19 +177,14 @@ const SlipPage: React.FC<{
     // 最新の単価設定を考慮して、表示用の合計金額を（必要であれば）再計算
     const currentSlipTotal = useMemo(() => {
         if (!slip.items || slip.items.length === 0) return slip.totalAmount || 0;
-        // 請求書・納品書、または保存された合計が 0 の場合は再計算を優先
-        if (isInvoice || isDelivery || forceDisplayPrice || (slip.totalAmount || 0) === 0) {
-            return slip.items.reduce((acc, item) => {
-                let price = item.appliedPrice || 0;
-                if (pricingRules && pricingRules.length > 0 && !item.slipItemNote && !item.name.includes('※特値')) {
-                    const latest = getAppliedPrice(item, slip.customerName || null, slip.constructionName || null, pricingRules);
-                    // 再計算結果が0の場合は保存済みの値を優先（マスター未設定の商品を保護）
-                    if (latest > 0 && (price === 0 || isInvoice || isDelivery || forceDisplayPrice)) price = latest;
-                }
-                return acc + (price * (item.deliveredQuantity ?? item.quantity));
-            }, 0);
+        // 請求書・納品書として発行済みのものは、保存された合計金額をそのまま使用する
+        if ((isInvoice || isDelivery) && (slip.totalAmount !== undefined && slip.totalAmount !== 0)) {
+            return slip.totalAmount;
         }
-        return slip.totalAmount || 0;
+        // それ以外（仮納品書など）は、個々のアイテムの金額を合算する
+        return slip.items.reduce((acc, item) => {
+            return acc + ((item.appliedPrice || 0) * (item.deliveredQuantity ?? item.quantity));
+        }, 0);
     }, [slip, pricingRules, isInvoice, isDelivery, forceDisplayPrice]);
 
     // 内部計算用の値を抽出
@@ -450,14 +445,6 @@ const SlipPage: React.FC<{
                             const deliveredQty = item ? (isWorkSlip ? null : (item.deliveredQuantity ?? item.quantity)) : null;
                             
                             let effectivePrice = item?.appliedPrice || 0;
-                            if (item && pricingRules.length > 0 && !item.slipItemNote && !item.name.includes('※特値')) {
-                                const latestPrice = getAppliedPrice(item, slip.customerName || null, slip.constructionName || null, pricingRules);
-                                // 再計算結果が0の場合は保存済みの値を優先（マスター未設定の商品を保護）
-                                if (latestPrice > 0 && (effectivePrice === 0 || isInvoice || isDelivery || forceDisplayPrice)) {
-                                    effectivePrice = latestPrice;
-                                }
-                            }
-
                             const amount = item ? (effectivePrice * (item.deliveredQuantity ?? item.quantity)) : 0;
 
                             const isLastRow = idx === 15;
@@ -618,7 +605,7 @@ const CartItemRow = React.memo(({
 }) => {
     const isReturn = activeMode === 'return';
     const [isNoteOpen, setIsNoteOpen] = useState(!!item.slipItemNote);
-    const [localQty, setLocalQty] = useState(item.quantity.toString());
+    const [localQty, setLocalQty] = useState(item.quantity === 0 ? '' : item.quantity.toString());
 
     useEffect(() => {
         if (parseInt(localQty) !== item.quantity && localQty !== '-') {
@@ -777,6 +764,13 @@ const CartItemRow = React.memo(({
                                 >
                                     <Sparkles size={12} />
                                     特値
+                                </button>
+                                <button 
+                                    onClick={() => onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, name: pi.name.includes('※市内手配品') ? pi.name.replace(' ※市内手配品', '').replace('※市内手配品', '').trim() : `${pi.name} ※市内手配品` } : pi))}
+                                    className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-[9px] font-black transition-all ${item.name.includes('※市内手配品') ? 'bg-blue-100 text-blue-600' : 'text-slate-300 hover:text-blue-400 hover:bg-blue-50'}`}
+                                >
+                                    <MapPin size={12} />
+                                    市内手配
                                 </button>
                             </div>
                         </div>
@@ -1056,11 +1050,15 @@ export const SlipManager: React.FC<{
     const itemSuggestions = useMemo(() => {
         if (!itemSearchQuery.trim()) return [];
         if (activeMode === 'return') {
-            return siteHistoryItems.filter(i => 
-                normalizeForSearch(i.name).includes(normalizeForSearch(itemSearchQuery)) ||
-                normalizeForSearch(i.model || '').includes(normalizeForSearch(itemSearchQuery)) ||
-                normalizeForSearch(i.dimensions || '').includes(normalizeForSearch(itemSearchQuery))
-            ).slice(0, 30);
+            const query = normalizeForSearch(itemSearchQuery);
+            return siteHistoryItems
+                .filter(i => 
+                    normalizeForSearch(i.name).includes(query) ||
+                    normalizeForSearch(i.model || '').includes(query) ||
+                    normalizeForSearch(i.dimensions || '').includes(query)
+                )
+                .sort((a, b) => naturalCompare(a.name + (a.dimensions || ''), b.name + (b.dimensions || '')))
+                .slice(0, 30);
         }
         return filterAndSortItems(masterItems, itemSearchQuery).slice(0, 30);
     }, [itemSearchQuery, masterItems, activeMode, siteHistoryItems]);
@@ -1069,7 +1067,7 @@ export const SlipManager: React.FC<{
         const price = getAppliedPrice(item, customerName, siteName, pricingRules);
         const itemToAdd = activeMode === 'return' 
             ? { ...item, quantity: -1, deliveredQuantity: 0, appliedPrice: price }
-            : { ...item, quantity: 1, appliedPrice: price, deliveredQuantity: 1 };
+            : { ...item, quantity: 0, appliedPrice: price, deliveredQuantity: 0 };
         
         onUpdateCart(prev => [...prev, { ...itemToAdd, id: `${item.id}__${generateId()}` }]);
         setItemSearchQuery(''); setShowItemSuggestions(false);
@@ -1093,7 +1091,7 @@ export const SlipManager: React.FC<{
             const price = getAppliedPrice(item, customerName, siteName, pricingRules);
             return activeMode === 'return'
                 ? { ...item, quantity: -1, deliveredQuantity: 0, appliedPrice: price }
-                : { ...item, quantity: 1, appliedPrice: price, deliveredQuantity: 1 };
+                : { ...item, quantity: 0, appliedPrice: price, deliveredQuantity: 0 };
         });
         onUpdateCart(prev => [...prev, ...itemsToAdd.map(it => ({ ...it, id: `${it.id}__${generateId()}` }))]);
         setItemSearchQuery(''); setShowItemSuggestions(false);
@@ -1108,14 +1106,14 @@ export const SlipManager: React.FC<{
             manufacturer: '',
             model: '',
             dimensions: '',
-            quantity: 1,
+            quantity: 0,
             unit: '個',
             location: '',
             listPrice: 0,
             sellingPrice: 0,
             costPrice: 0,
             appliedPrice: 0,
-            deliveredQuantity: 1,
+            deliveredQuantity: 0,
             updatedAt: Date.now()
         };
         onUpdateCart(prev => [...prev, newItem]);
@@ -1324,20 +1322,24 @@ export const SlipManager: React.FC<{
             const itemsMap = siteItemsMap.get(currentSKey)!;
 
             s.items.forEach(i => {
-                const qty = i.deliveredQuantity ?? i.quantity; if (qty === 0) return;
-                const isReturning = s.type === 'return' || qty < 0;
+                const qty = i.deliveredQuantity ?? i.quantity;
+                if (qty === 0) return;
                 
-                // 請求書作成時に最新単価を再確認（手動修正メモがない場合）
-                let price = i.appliedPrice;
+                // 顧客ルールによる単価の再適用（伝票保存時の単価ミスをここで自動修正する）
+                // ただし、備考がある場合や「特値」と明記されている場合は手動設定を優先
+                let price = i.appliedPrice || 0;
                 if (!i.slipItemNote && !i.name.includes('※特値')) {
-                    const realId = i.id.includes('__') ? i.id.split('__')[0] : i.id;
-                    const master = masterItems.find(m => m.id === realId);
-                    if (master) {
-                        price = getAppliedPrice(master, s.customerName, s.constructionName || null, pricingRules);
-                    }
+                    const rulePrice = getAppliedPrice(i, cName, s.constructionName || null, pricingRules);
+                    if (rulePrice > 0) price = rulePrice;
                 }
 
-                const itemKey = `${s.date}_${s.slipNumber || 'UNK'}_${isReturning ? 'RET' : 'SALE'}_${i.name}_${i.model}_${price}`;
+                const isReturning = s.type === 'return' || qty < 0;
+                
+                // 集計用キー：日付、伝票番号、種別、品名、メーカー、型式、寸法、単価を全て含めて厳密に区別
+                // 寸法や型式の僅かな違い（スペースの有無など）で合算されないよう正規化
+                const safeDim = (i.dimensions || '').replace(/\s+/g, '').trim();
+                const safeModel = (i.model || '').replace(/\s+/g, '').trim();
+                const itemKey = `${s.date}_${s.slipNumber || 'UNK'}_${isReturning ? 'RET' : 'SALE'}_${i.name}_${i.manufacturer || ''}_${safeModel}_${safeDim}_${price}`;
 
                 if (itemsMap.has(itemKey)) {
                     const ex = itemsMap.get(itemKey)!;
@@ -1354,6 +1356,8 @@ export const SlipManager: React.FC<{
                         sourceSlipNo: s.slipNumber
                     });
                 }
+                
+                // 現場別合計を計算
                 siteTotals.set(currentSKey, (siteTotals.get(currentSKey) || 0) + (price * qty));
             });
         });
@@ -2020,18 +2024,14 @@ export const SlipManager: React.FC<{
                                                         <span className="text-[10px] font-black text-emerald-500/60 uppercase tracking-tighter">TOTAL:</span>
                                                         <span className="text-base md:text-lg font-mono font-black text-emerald-400">
                                                             ¥{Math.round((Array.from(sMap.values()).flat() as Slip[]).reduce((acc, s) => {
-                                                                let total = s.totalAmount || 0;
-                                                                if (pricingRules && pricingRules.length > 0 && s.items) {
-                                                                    total = s.items.reduce((iAcc, item) => {
-                                                                        let price = item.appliedPrice || 0;
-                                                                        if (!item.slipItemNote && !item.name.includes('※特値')) {
-                                                                            const latest = getAppliedPrice(item, s.customerName, s.constructionName || null, pricingRules);
-                                                                            // 再計算結果が0の場合は保存済み値を使用
-                                                                            if (latest > 0) price = latest;
-                                                                        }
-                                                                        return iAcc + (price * (item.deliveredQuantity ?? item.quantity));
-                                                                    }, 0);
-                                                                }
+                                                                const total = s.items?.reduce((iAcc, item) => {
+                                                                    let price = item.appliedPrice || 0;
+                                                                    if (!item.slipItemNote && !item.name.includes('※特値')) {
+                                                                        const latest = getAppliedPrice(item, s.customerName, s.constructionName || null, pricingRules);
+                                                                        if (latest > 0) price = latest;
+                                                                    }
+                                                                    return iAcc + (price * (item.deliveredQuantity ?? item.quantity));
+                                                                }, 0) || s.totalAmount || 0;
                                                                 return acc + (total * 1.1);
                                                             }, 0)).toLocaleString()}
                                                         </span>
@@ -2071,19 +2071,17 @@ export const SlipManager: React.FC<{
                                                                         <div className="sm:hidden border-t border-slate-100 my-1"></div>
                                                                         <div className="font-mono font-black text-slate-900 sm:w-32 sm:text-right">
                                                                             ¥{(() => {
-                                                                                let total = sl.totalAmount || 0;
-                                                                                if (pricingRules && pricingRules.length > 0 && sl.items) {
-                                                                                    total = sl.items.reduce((acc, item) => {
+                                                                                if (sl.items && sl.items.length > 0) {
+                                                                                    return sl.items.reduce((acc, item) => {
                                                                                         let price = item.appliedPrice || 0;
                                                                                         if (!item.slipItemNote && !item.name.includes('※特値')) {
                                                                                             const latest = getAppliedPrice(item, sl.customerName, sl.constructionName || null, pricingRules);
-                                                                                            // 再計算結果が0の場合は保存済み値を使用
                                                                                             if (latest > 0) price = latest;
                                                                                         }
                                                                                         return acc + (price * (item.deliveredQuantity ?? item.quantity));
                                                                                     }, 0);
                                                                                 }
-                                                                                return total;
+                                                                                return sl.totalAmount || 0;
                                                                             })().toLocaleString()}
                                                                         </div>
                                                                     </div>
