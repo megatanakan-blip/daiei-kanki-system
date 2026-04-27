@@ -230,46 +230,82 @@ export const getAppliedPrice = (item: MaterialItem, activeCustomer: string | nul
 };
 
 /**
+ * Calculates a match-quality score for a single term against a field value.
+ * Higher score = better match.
+ *   4: exact full match
+ *   3: word-boundary match (term appears as a standalone word/token)
+ *   2: starts-with match (field starts with term)
+ *   1: substring match
+ *   0: no match
+ *
+ * "Word boundary" here means the character before/after the term is
+ * not alphanumeric or Japanese, so "T" won't score 3 against "LT".
+ */
+const termScore = (field: string, term: string): number => {
+    if (!field.includes(term)) return 0;
+    if (field === term) return 4;
+
+    // Word-boundary check using surrounding characters
+    const idx = field.indexOf(term);
+    const before = idx > 0 ? field[idx - 1] : ' ';
+    const after = idx + term.length < field.length ? field[idx + term.length] : ' ';
+    const isBoundaryChar = (c: string) => /[\s\-_\/×x・,.()\[\]{}]/.test(c) || !/[a-z0-9\u3040-\u30ff\u4e00-\u9fff]/.test(c);
+    if (isBoundaryChar(before) && isBoundaryChar(after)) return 3;
+
+    if (field.startsWith(term)) return 2;
+    return 1;
+};
+
+/**
+ * Computes the total relevance score for an item against all search terms.
+ * Returns null if any term is not matched at all (filter-out).
+ */
+const itemRelevanceScore = (item: MaterialItem, terms: string[]): number | null => {
+    const fields = [
+        normalizeForSearch(item.name),
+        normalizeForSearch(item.category),
+        normalizeForSearch(item.model || ''),
+        normalizeForSearch(item.maker || ''),
+        normalizeForSearch(item.shelfNumber || ''),
+        normalizeForSearch(item.dimensions || ''),
+    ];
+
+    let totalScore = 0;
+    for (const term of terms) {
+        const best = Math.max(...fields.map(f => termScore(f, term)));
+        if (best === 0) return null; // term not found → filter out
+        totalScore += best;
+    }
+    return totalScore;
+};
+
+/**
  * Filter and sort items based on multiple search terms.
- * Optimized with caching.
+ * Scoring priority per term: exact(4) > word-boundary(3) > starts-with(2) > substring(1).
+ * This prevents "LT" / "RT" from outranking a lone "T" search.
  */
 export const filterAndSortItems = (items: MaterialItem[], searchTerms: string): MaterialItem[] => {
     if (!searchTerms.trim()) return items;
 
     const terms = searchTerms.split(/\s+/).map(t => normalizeForSearch(t)).filter(t => t.length > 0);
-    
-    return items
-        .filter(item => {
-            const name = normalizeForSearch(item.name);
-            const category = normalizeForSearch(item.category);
-            const model = normalizeForSearch(item.model || '');
-            const maker = normalizeForSearch(item.maker || '');
-            const number = normalizeForSearch(item.shelfNumber || '');
-            
-            return terms.every(term => 
-                name.includes(term) || 
-                category.includes(term) || 
-                model.includes(term) || 
-                maker.includes(term) || 
-                number.includes(term)
-            );
-        })
-        .sort((a, b) => {
-            // Priority matches for first term
-            const firstTerm = terms[0];
-            const aName = normalizeForSearch(a.name);
-            const bName = normalizeForSearch(b.name);
-            
-            const aStarts = aName.startsWith(firstTerm);
-            const bStarts = bName.startsWith(firstTerm);
-            
-            if (aStarts && !bStarts) return -1;
-            if (!aStarts && bStarts) return 1;
-            
-            // 品名だけでなく型式・寸法も含めて比較することで、同名商品のサイズ順ソートを実現
-            const aFull = `${aName} ${normalizeForSearch(a.model || '')} ${normalizeForSearch(a.dimensions || '')}`;
-            const bFull = `${bName} ${normalizeForSearch(b.model || '')} ${normalizeForSearch(b.dimensions || '')}`;
-            
-            return naturalCompare(aFull, bFull);
-        });
+
+    const scored: Array<{ item: MaterialItem; score: number }> = [];
+    for (const item of items) {
+        const score = itemRelevanceScore(item, terms);
+        if (score !== null) {
+            scored.push({ item, score });
+        }
+    }
+
+    scored.sort((a, b) => {
+        // Higher relevance score first
+        if (b.score !== a.score) return b.score - a.score;
+
+        // Tie-break: natural sort by name + model + dimensions
+        const aFull = `${normalizeForSearch(a.item.name)} ${normalizeForSearch(a.item.model || '')} ${normalizeForSearch(a.item.dimensions || '')}`;
+        const bFull = `${normalizeForSearch(b.item.name)} ${normalizeForSearch(b.item.model || '')} ${normalizeForSearch(b.item.dimensions || '')}`;
+        return naturalCompare(aFull, bFull);
+    });
+
+    return scored.map(s => s.item);
 };
