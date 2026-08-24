@@ -758,12 +758,18 @@ const CartItemRow = React.memo(({
                                     onChange={e => {
                                         const val = e.target.value;
                                         if (val === '' || val === '-' || /^-?\d*$/.test(val)) {
-                                            setLocalQty(val);
-                                            const n = parseInt(val);
+                                            let n = parseInt(val);
                                             if (!isNaN(n)) {
+                                                if (isReturn && n > 0) {
+                                                    n = -n;
+                                                }
+                                                setLocalQty(n.toString());
                                                 onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, quantity: n, ...(isProvEdit ? { deliveredQuantity: n } : {}) } : pi));
                                             } else if (val === '') {
+                                                setLocalQty('');
                                                 onUpdateCart(p => p.map(pi => pi.id === item.id ? { ...pi, quantity: 0, ...(isProvEdit ? { deliveredQuantity: 0 } : {}) } : pi));
+                                            } else if (val === '-') {
+                                                setLocalQty('-');
                                             }
                                         }
                                     }}
