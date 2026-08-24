@@ -1,7 +1,7 @@
-
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { Slip, SlipItem, SlipType, DeliveryTime, DeliveryDestination, MaterialItem, PricingRule, Customer } from '../types';
+import { FEATURE_FLAGS, FEATURE_DISABLED_MESSAGES } from '../config/featureFlags';
 import { X, Trash2, Printer, FileText, ShoppingCart, Save, HardHat, Loader2, Edit3, FileOutput, CheckSquare, Square, Search, MapPin, Clock, Users, Info, RotateCcw, AlertTriangle, ArrowRight, Package, Layers, Check, PlusCircle, Calculator, History, Archive, FileStack, ChevronDown, ChevronRight, Building2, Eye, EyeOff, Calendar, User, UserCheck, Camera, Sparkles, Plus, Minus, MessageSquare, Edit2, LayoutGrid, FileSearch, Database, Mail, GripVertical } from 'lucide-react';
 import * as storage from '../services/firebaseService';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
@@ -290,6 +290,7 @@ const SlipPage: React.FC<{
                                                 <input
                                                     type="text"
                                                     inputMode="numeric"
+                                                    disabled={!FEATURE_FLAGS.enableCarryOverPayment}
                                                     value={prevAmt.toLocaleString()}
                                                     onChange={(e) => {
                                                         const val = e.target.value.replace(/,/g, '');
@@ -297,7 +298,8 @@ const SlipPage: React.FC<{
                                                             onUpdateSlip?.({ previousBillingAmount: parseInt(val) || 0 });
                                                         }
                                                     }}
-                                                    className="w-full text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-1 print:hidden font-mono font-bold"
+                                                    className={`w-full text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-1 print:hidden font-mono font-bold ${!FEATURE_FLAGS.enableCarryOverPayment ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                    title={!FEATURE_FLAGS.enableCarryOverPayment ? FEATURE_DISABLED_MESSAGES.enableCarryOverPayment : undefined}
                                                 />
                                                 <span className="hidden print:block">¥{prevAmt.toLocaleString()}</span>
                                             </td>
@@ -305,6 +307,7 @@ const SlipPage: React.FC<{
                                                 <input
                                                     type="text"
                                                     inputMode="numeric"
+                                                    disabled={!FEATURE_FLAGS.enableCarryOverPayment}
                                                     value={payRec.toLocaleString()}
                                                     onChange={(e) => {
                                                         const val = e.target.value.replace(/,/g, '');
@@ -312,7 +315,8 @@ const SlipPage: React.FC<{
                                                             onUpdateSlip?.({ paymentReceived: parseInt(val) || 0 });
                                                         }
                                                     }}
-                                                    className="w-full text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-1 print:hidden font-mono font-bold"
+                                                    className={`w-full text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-1 print:hidden font-mono font-bold ${!FEATURE_FLAGS.enableCarryOverPayment ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                    title={!FEATURE_FLAGS.enableCarryOverPayment ? FEATURE_DISABLED_MESSAGES.enableCarryOverPayment : undefined}
                                                 />
                                                 <span className="hidden print:block">¥{payRec.toLocaleString()}</span>
                                             </td>
@@ -476,7 +480,14 @@ const SlipPage: React.FC<{
                                         </td>
                                     )}
                                     <td className="px-2 border-r truncate font-bold">
-                                        <div>{item?.name || ''}</div>
+                                        <div className="flex items-center gap-1">
+                                            {item?.itemKind && (
+                                                <span className="text-[7px] bg-slate-100 text-slate-700 font-bold px-1 rounded border border-slate-300 print:hidden shrink-0">
+                                                    {item.itemKind}
+                                                </span>
+                                            )}
+                                            <span className="truncate">{item?.name || ''}</span>
+                                        </div>
                                         {item?.manufacturer && <div className="text-[8px] text-slate-500 font-normal leading-tight">{item.manufacturer}</div>}
                                         {item?.sourceSlipNo && <div className="text-[7px] text-slate-400 font-mono leading-none mt-0.5">伝票: {item.sourceSlipNo}</div>}
                                     </td>
@@ -1078,10 +1089,15 @@ export const SlipManager: React.FC<{
         }>();
 
         const normalizedSiteName = normalizeForSearch(siteName);
+        const normalizedCustomer = normalizeForSearch(customerName);
+
         slips.forEach(s => {
-            if (s.customerName === customerName && normalizeForSearch(s.constructionName || '').includes(normalizedSiteName) && s.id !== editingSlipId) {
+            const isCustMatch = s.customerName === customerName || normalizeForSearch(s.customerName || '') === normalizedCustomer;
+            const isSiteMatch = normalizeForSearch(s.constructionName || '').includes(normalizedSiteName);
+
+            if (isCustMatch && isSiteMatch && s.id !== editingSlipId) {
                 const month = s.date.slice(0, 7);
-                if (s.type === 'provisional' || s.type === 'delivery') {
+                if (s.type === 'provisional' || s.type === 'delivery' || s.type === 'outbound') {
                     s.items.forEach(item => {
                         const key = `${item.name}-${item.model}-${item.dimensions}-${item.appliedPrice}-${month}`;
                         if (!historyMap.has(key)) {
@@ -1115,13 +1131,24 @@ export const SlipManager: React.FC<{
                 appliedPrice: entry.price
             }))
             .filter(i => i.availableQuantity > 0);
-    }, [customerName, siteName, slips]);
+    }, [customerName, siteName, slips, editingSlipId]);
 
     const { itemSuggestions, totalMatchingCount } = useMemo(() => {
+        if (activeMode === 'return') {
+            if (!itemSearchQuery.trim()) {
+                return {
+                    itemSuggestions: siteHistoryItems.slice(0, 100),
+                    totalMatchingCount: siteHistoryItems.length
+                };
+            }
+            const allMatches = filterAndSortItems(siteHistoryItems as any[], itemSearchQuery);
+            return {
+                itemSuggestions: allMatches.slice(0, 100),
+                totalMatchingCount: allMatches.length
+            };
+        }
         if (!itemSearchQuery.trim()) return { itemSuggestions: [], totalMatchingCount: 0 };
-        const allMatches = activeMode === 'return'
-            ? filterAndSortItems(siteHistoryItems as any[], itemSearchQuery)
-            : filterAndSortItems(masterItems, itemSearchQuery);
+        const allMatches = filterAndSortItems(masterItems, itemSearchQuery);
         return {
             itemSuggestions: allMatches.slice(0, 100),
             totalMatchingCount: allMatches.length
@@ -1129,7 +1156,9 @@ export const SlipManager: React.FC<{
     }, [itemSearchQuery, masterItems, activeMode, siteHistoryItems]);
 
     const handleAddFromMaster = (item: any) => {
-        const price = getAppliedPrice(item, customerName, siteName, pricingRules);
+        const price = (activeMode === 'return' && item.appliedPrice !== undefined)
+            ? item.appliedPrice
+            : getAppliedPrice(item, customerName, siteName, pricingRules);
         const itemToAdd = activeMode === 'return' 
             ? { ...item, quantity: -1, deliveredQuantity: 0, appliedPrice: price }
             : { ...item, quantity: 0, appliedPrice: price, deliveredQuantity: 0 };
@@ -1153,7 +1182,9 @@ export const SlipManager: React.FC<{
     const handleBulkAdd = () => {
         if (selectedSuggestions.size === 0) return;
         const itemsToAdd = Array.from(selectedSuggestions.values()).map((item: any) => {
-            const price = getAppliedPrice(item, customerName, siteName, pricingRules);
+            const price = (activeMode === 'return' && item.appliedPrice !== undefined)
+                ? item.appliedPrice
+                : getAppliedPrice(item, customerName, siteName, pricingRules);
             return activeMode === 'return'
                 ? { ...item, quantity: -1, deliveredQuantity: 0, appliedPrice: price }
                 : { ...item, quantity: 0, appliedPrice: price, deliveredQuantity: 0 };
@@ -1262,8 +1293,8 @@ export const SlipManager: React.FC<{
                 return s + ((i.appliedPrice || 0) * qtyToUse);
             }, 0);
 
-            const matchedCustomer = customers.find(c => c.name === customerName || c.id === customerId);
-            const finalCustomerId = matchedCustomer?.id || customerId;
+            const matchedCustomer = customers.find(c => c.name === customerName);
+            const finalCustomerId = matchedCustomer?.id;
             let finalSiteId: string | undefined = undefined;
 
             if (matchedCustomer && siteName && siteName.trim()) {

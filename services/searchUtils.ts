@@ -178,6 +178,7 @@ export const getAppliedPrice = (item: MaterialItem, activeCustomer: string | nul
         const normDims = normalizeForSearch(item.dimensions || '');
         
         r = scopeRules.find(r => 
+            !r.materialId &&
             normalizeForSearch(r.materialName || '') === normName &&
             normalizeForSearch(r.category) === normCat &&
             normalizeForSearch(r.model || '') === normModel &&
@@ -187,6 +188,7 @@ export const getAppliedPrice = (item: MaterialItem, activeCustomer: string | nul
 
         // 3. Name + Category + Model Match
         r = scopeRules.find(r => 
+            !r.materialId &&
             normalizeForSearch(r.materialName || '') === normName &&
             normalizeForSearch(r.category) === normCat &&
             normalizeForSearch(r.model || '') === normModel
@@ -196,6 +198,7 @@ export const getAppliedPrice = (item: MaterialItem, activeCustomer: string | nul
         // 4. Category + Model Match
         if (item.model) {
             r = scopeRules.find(r => 
+                !r.materialId &&
                 normalizeForSearch(r.category) === normCat && 
                 normalizeForSearch(r.model || '') === normModel
             );
@@ -204,6 +207,7 @@ export const getAppliedPrice = (item: MaterialItem, activeCustomer: string | nul
 
         // 5. Category Match (model: 'All')
         r = scopeRules.find(r => 
+            !r.materialId &&
             normalizeForSearch(r.category) === normCat && 
             (!r.model || r.model === 'All' || r.model === '')
         );
@@ -276,13 +280,14 @@ const termScore = (field: string, term: string): number => {
  */
 const itemRelevanceScore = (item: MaterialItem, terms: string[]): number | null => {
     const fields = [
-        normalizeForSearch(item.name),
-        normalizeForSearch(item.category),
+        normalizeForSearch(item.name || ''),
+        normalizeForSearch(item.category || ''),
         normalizeForSearch(item.model || ''),
         normalizeForSearch(item.manufacturer || ''),
         normalizeForSearch(item.location || ''),
         normalizeForSearch(item.dimensions || ''),
         normalizeForSearch(item.size || ''),
+        normalizeForSearch((item as any).historyMonth || ''),
     ];
 
     let totalScore = 0;
