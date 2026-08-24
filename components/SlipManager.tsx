@@ -1122,16 +1122,24 @@ export const SlipManager: React.FC<{
         });
 
         return Array.from(historyMap.values())
-            .map(entry => ({
-                ...entry.item,
-                availableQuantity: entry.totalDelivered - entry.totalReturned,
-                totalDelivered: entry.totalDelivered,
-                totalReturned: entry.totalReturned,
-                historyMonth: entry.month,
-                appliedPrice: entry.price
-            }))
+            .map((entry, idx) => {
+                const historyKey = `${entry.name}__${entry.model || ''}__${entry.dims || ''}__${entry.price}__${entry.month}__${idx}`;
+                return {
+                    ...entry.item,
+                    historyKey,
+                    availableQuantity: entry.totalDelivered - entry.totalReturned,
+                    totalDelivered: entry.totalDelivered,
+                    totalReturned: entry.totalReturned,
+                    historyMonth: entry.month,
+                    appliedPrice: entry.price
+                };
+            })
             .filter(i => i.availableQuantity > 0);
     }, [customerName, siteName, slips, editingSlipId]);
+
+    const getSuggestionKey = (i: any) => {
+        return i.historyKey || (i.id + (i.historyMonth ? `__${i.historyMonth}__${i.appliedPrice}` : ''));
+    };
 
     const { itemSuggestions, totalMatchingCount } = useMemo(() => {
         if (activeMode === 'return') {
@@ -1169,7 +1177,7 @@ export const SlipManager: React.FC<{
     };
 
     const handleToggleSuggestion = (item: any) => {
-        const key = item.id + (item.historyMonth || '');
+        const key = getSuggestionKey(item);
         const next = new Map(selectedSuggestions);
         if (next.has(key)) {
             next.delete(key);
@@ -2084,7 +2092,7 @@ export const SlipManager: React.FC<{
                                                             </div>
                                                             <div className="flex-grow overflow-y-auto divide-y divide-slate-100">
                                                                 {itemSuggestions.map((i: any) => {
-                                                                    const key = i.id + (i.historyMonth || '');
+                                                                    const key = getSuggestionKey(i);
                                                                     const isSelected = selectedSuggestions.has(key);
                                                                     return (
                                                                         <div 
