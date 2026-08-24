@@ -1081,23 +1081,23 @@ export const SlipManager: React.FC<{
     }, [customerName, showSuggestions, customers]);
 
     const siteHistoryItems = useMemo(() => {
-        if (!customerName || !siteName) return [];
+        if (!customerName) return [];
         
         const historyMap = new Map<string, { 
             name: string; model: string; dims: string; price: number; month: string; 
             totalDelivered: number; totalReturned: number; item: SlipItem 
         }>();
 
-        const normalizedSiteName = normalizeForSearch(siteName);
         const normalizedCustomer = normalizeForSearch(customerName);
+        const normalizedSiteName = siteName ? normalizeForSearch(siteName) : '';
 
         slips.forEach(s => {
             const isCustMatch = s.customerName === customerName || normalizeForSearch(s.customerName || '') === normalizedCustomer;
-            const isSiteMatch = normalizeForSearch(s.constructionName || '').includes(normalizedSiteName);
+            const isSiteMatch = !normalizedSiteName || normalizeForSearch(s.constructionName || '').includes(normalizedSiteName);
 
             if (isCustMatch && isSiteMatch && s.id !== editingSlipId) {
                 const month = s.date.slice(0, 7);
-                if (s.type === 'provisional' || s.type === 'delivery' || s.type === 'outbound') {
+                if (s.type !== 'return') {
                     s.items.forEach(item => {
                         const itemPrice = (item.appliedPrice !== undefined && item.appliedPrice > 0) ? item.appliedPrice : (item.sellingPrice || 0);
                         const key = `${item.name}__${item.model || ''}__${item.dimensions || ''}__${itemPrice}__${month}`;
@@ -1109,9 +1109,9 @@ export const SlipManager: React.FC<{
                             });
                         }
                         const entry = historyMap.get(key)!;
-                        entry.totalDelivered += (item.deliveredQuantity || item.quantity);
+                        entry.totalDelivered += (item.deliveredQuantity || item.quantity || 0);
                     });
-                } else if (s.type === 'return') {
+                } else {
                     s.items.forEach(item => {
                         const itemPrice = (item.appliedPrice !== undefined && item.appliedPrice > 0) ? item.appliedPrice : (item.sellingPrice || 0);
                         const key = `${item.name}__${item.model || ''}__${item.dimensions || ''}__${itemPrice}__${item.date?.slice(0, 7) || month}`;
@@ -1141,34 +1141,40 @@ export const SlipManager: React.FC<{
     }, [customerName, siteName, slips, editingSlipId]);
 
     const getSuggestionKey = (i: any) => {
-        return i.historyKey || i.id;
+        return i.suggestionKey || i.historyKey || i.id;
     };
 
     const { itemSuggestions, totalMatchingCount } = useMemo(() => {
+        let baseItems: any[] = [];
         if (activeMode === 'return') {
+            baseItems = siteHistoryItems.length > 0 ? siteHistoryItems : masterItems;
             if (!itemSearchQuery.trim()) {
-                return {
-                    itemSuggestions: siteHistoryItems.slice(0, 100),
-                    totalMatchingCount: siteHistoryItems.length
-                };
+                const decorated = baseItems.slice(0, 100).map((it, idx) => ({
+                    ...it,
+                    suggestionKey: it.historyKey || `sug__${it.id}__${idx}`
+                }));
+                return { itemSuggestions: decorated, totalMatchingCount: baseItems.length };
             }
-            const allMatches = filterAndSortItems(siteHistoryItems as any[], itemSearchQuery);
-            return {
-                itemSuggestions: allMatches.slice(0, 100),
-                totalMatchingCount: allMatches.length
-            };
+            const allMatches = filterAndSortItems(baseItems, itemSearchQuery);
+            const decorated = allMatches.slice(0, 100).map((it, idx) => ({
+                ...it,
+                suggestionKey: it.historyKey || `sug__${it.id}__${idx}`
+            }));
+            return { itemSuggestions: decorated, totalMatchingCount: allMatches.length };
         }
+
         if (!itemSearchQuery.trim()) return { itemSuggestions: [], totalMatchingCount: 0 };
         const allMatches = filterAndSortItems(masterItems, itemSearchQuery);
-        return {
-            itemSuggestions: allMatches.slice(0, 100),
-            totalMatchingCount: allMatches.length
-        };
+        const decorated = allMatches.slice(0, 100).map((it, idx) => ({
+            ...it,
+            suggestionKey: `sug__${it.id}__${idx}`
+        }));
+        return { itemSuggestions: decorated, totalMatchingCount: allMatches.length };
     }, [itemSearchQuery, masterItems, activeMode, siteHistoryItems]);
 
     const handleAddFromMaster = (item: any) => {
         const price = activeMode === 'return'
-            ? ((item.appliedPrice !== undefined && item.appliedPrice > 0) ? item.appliedPrice : (item.sellingPrice || 0))
+            ? (item.historyMonth ? (item.appliedPrice ?? item.sellingPrice ?? 0) : getAppliedPrice(item, customerName, siteName, pricingRules))
             : getAppliedPrice(item, customerName, siteName, pricingRules);
         const itemToAdd = activeMode === 'return' 
             ? { ...item, quantity: -1, deliveredQuantity: 0, appliedPrice: price }
@@ -1194,7 +1200,7 @@ export const SlipManager: React.FC<{
         if (selectedSuggestions.size === 0) return;
         const itemsToAdd = Array.from(selectedSuggestions.values()).map((item: any) => {
             const price = activeMode === 'return'
-                ? ((item.appliedPrice !== undefined && item.appliedPrice > 0) ? item.appliedPrice : (item.sellingPrice || 0))
+                ? (item.historyMonth ? (item.appliedPrice ?? item.sellingPrice ?? 0) : getAppliedPrice(item, customerName, siteName, pricingRules))
                 : getAppliedPrice(item, customerName, siteName, pricingRules);
             return activeMode === 'return'
                 ? { ...item, quantity: -1, deliveredQuantity: 0, appliedPrice: price }
