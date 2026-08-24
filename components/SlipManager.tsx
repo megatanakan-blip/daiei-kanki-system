@@ -1099,11 +1099,12 @@ export const SlipManager: React.FC<{
                 const month = s.date.slice(0, 7);
                 if (s.type === 'provisional' || s.type === 'delivery' || s.type === 'outbound') {
                     s.items.forEach(item => {
-                        const key = `${item.name}-${item.model}-${item.dimensions}-${item.appliedPrice}-${month}`;
+                        const itemPrice = (item.appliedPrice !== undefined && item.appliedPrice > 0) ? item.appliedPrice : (item.sellingPrice || 0);
+                        const key = `${item.name}__${item.model || ''}__${item.dimensions || ''}__${itemPrice}__${month}`;
                         if (!historyMap.has(key)) {
                             historyMap.set(key, { 
-                                name: item.name, model: item.model, dims: item.dimensions, 
-                                price: item.appliedPrice, month, 
+                                name: item.name, model: item.model || '', dims: item.dimensions || '', 
+                                price: itemPrice, month, 
                                 totalDelivered: 0, totalReturned: 0, item 
                             });
                         }
@@ -1112,7 +1113,8 @@ export const SlipManager: React.FC<{
                     });
                 } else if (s.type === 'return') {
                     s.items.forEach(item => {
-                        const key = `${item.name}-${item.model}-${item.dimensions}-${item.appliedPrice}-${item.date?.slice(0, 7) || month}`;
+                        const itemPrice = (item.appliedPrice !== undefined && item.appliedPrice > 0) ? item.appliedPrice : (item.sellingPrice || 0);
+                        const key = `${item.name}__${item.model || ''}__${item.dimensions || ''}__${itemPrice}__${item.date?.slice(0, 7) || month}`;
                         if (historyMap.has(key)) {
                             historyMap.get(key)!.totalReturned += Math.abs(item.quantity);
                         }
@@ -1123,9 +1125,10 @@ export const SlipManager: React.FC<{
 
         return Array.from(historyMap.values())
             .map((entry, idx) => {
-                const historyKey = `${entry.name}__${entry.model || ''}__${entry.dims || ''}__${entry.price}__${entry.month}__${idx}`;
+                const historyKey = `hist__${entry.name}__${entry.model}__${entry.dims}__${entry.price}__${entry.month}__${idx}`;
                 return {
                     ...entry.item,
+                    id: historyKey,
                     historyKey,
                     availableQuantity: entry.totalDelivered - entry.totalReturned,
                     totalDelivered: entry.totalDelivered,
@@ -1138,7 +1141,7 @@ export const SlipManager: React.FC<{
     }, [customerName, siteName, slips, editingSlipId]);
 
     const getSuggestionKey = (i: any) => {
-        return i.historyKey || (i.id + (i.historyMonth ? `__${i.historyMonth}__${i.appliedPrice}` : ''));
+        return i.historyKey || i.id;
     };
 
     const { itemSuggestions, totalMatchingCount } = useMemo(() => {
@@ -1164,8 +1167,8 @@ export const SlipManager: React.FC<{
     }, [itemSearchQuery, masterItems, activeMode, siteHistoryItems]);
 
     const handleAddFromMaster = (item: any) => {
-        const price = (activeMode === 'return' && item.appliedPrice !== undefined)
-            ? item.appliedPrice
+        const price = activeMode === 'return'
+            ? ((item.appliedPrice !== undefined && item.appliedPrice > 0) ? item.appliedPrice : (item.sellingPrice || 0))
             : getAppliedPrice(item, customerName, siteName, pricingRules);
         const itemToAdd = activeMode === 'return' 
             ? { ...item, quantity: -1, deliveredQuantity: 0, appliedPrice: price }
@@ -1190,8 +1193,8 @@ export const SlipManager: React.FC<{
     const handleBulkAdd = () => {
         if (selectedSuggestions.size === 0) return;
         const itemsToAdd = Array.from(selectedSuggestions.values()).map((item: any) => {
-            const price = (activeMode === 'return' && item.appliedPrice !== undefined)
-                ? item.appliedPrice
+            const price = activeMode === 'return'
+                ? ((item.appliedPrice !== undefined && item.appliedPrice > 0) ? item.appliedPrice : (item.sellingPrice || 0))
                 : getAppliedPrice(item, customerName, siteName, pricingRules);
             return activeMode === 'return'
                 ? { ...item, quantity: -1, deliveredQuantity: 0, appliedPrice: price }
