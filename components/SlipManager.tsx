@@ -1177,7 +1177,7 @@ export const SlipManager: React.FC<{
             ? (item.historyMonth ? (item.appliedPrice ?? item.sellingPrice ?? 0) : getAppliedPrice(item, customerName, siteName, pricingRules))
             : getAppliedPrice(item, customerName, siteName, pricingRules);
         const itemToAdd = activeMode === 'return' 
-            ? { ...item, quantity: -1, deliveredQuantity: 0, appliedPrice: price }
+            ? { ...item, quantity: 0, deliveredQuantity: 0, appliedPrice: price }
             : { ...item, quantity: 0, appliedPrice: price, deliveredQuantity: 0 };
         
         onUpdateCart(prev => [...prev, { ...itemToAdd, id: `${item.id}__${generateId()}` }]);
@@ -1203,7 +1203,7 @@ export const SlipManager: React.FC<{
                 ? (item.historyMonth ? (item.appliedPrice ?? item.sellingPrice ?? 0) : getAppliedPrice(item, customerName, siteName, pricingRules))
                 : getAppliedPrice(item, customerName, siteName, pricingRules);
             return activeMode === 'return'
-                ? { ...item, quantity: -1, deliveredQuantity: 0, appliedPrice: price }
+                ? { ...item, quantity: 0, deliveredQuantity: 0, appliedPrice: price }
                 : { ...item, quantity: 0, appliedPrice: price, deliveredQuantity: 0 };
         });
         onUpdateCart(prev => [...prev, ...itemsToAdd.map(it => ({ ...it, id: `${it.id}__${generateId()}` }))]);
