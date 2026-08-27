@@ -476,7 +476,7 @@ const SlipPage: React.FC<{
                                     {isDetail && (
                                         <td className="text-center border-r font-mono text-[9px] py-0.5">
                                             <div className="text-[8px] text-slate-500 leading-none">{item?.orderDate?.slice(5).replace('-', '/') || ''}</div>
-                                            <div className="font-bold leading-none mt-1">{item?.date?.slice(5).replace('-', '/') || ''}</div>
+                                            <div className="font-bold leading-none mt-1">{((isReturn ? (slip.date || item?.date) : item?.date) || '').slice(5).replace('-', '/')}</div>
                                         </td>
                                     )}
                                     <td className="px-2 border-r truncate font-bold">
@@ -1293,7 +1293,7 @@ export const SlipManager: React.FC<{
                 // 仮納品書の修正時、元のdeliveredQuantityを保持する（未設定時はqtyを使用）
                 const isProvEdit = editingSlipId && archivedSlips.find(s => s.id === editingSlipId)?.type === 'provisional';
                 const finalDeliveredQty = isProvEdit ? (i.deliveredQuantity ?? qty) : qty;
-                return { ...i, id: realId, quantity: qty, deliveredQuantity: finalDeliveredQty, date: i.date || slipDate, orderDate: i.orderDate || orderDate };
+                return { ...i, id: realId, quantity: qty, deliveredQuantity: finalDeliveredQty, date: activeMode === 'return' ? slipDate : (i.date || slipDate), orderDate: i.orderDate || orderDate };
             });
 
             if (activeMode === 'return') {
