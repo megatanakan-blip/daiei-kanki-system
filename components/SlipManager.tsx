@@ -1357,6 +1357,7 @@ export const SlipManager: React.FC<{
             }
 
             if (editingSlipId) {
+                const targetSlip = slips.find(sl => sl.id === editingSlipId);
                 const updateData: Partial<Slip> = {
                     date: slipDate, orderDate, customerName, constructionName: siteName, 
                     customerId: finalCustomerId, siteId: finalSiteId, items: processedItems,
@@ -1365,6 +1366,21 @@ export const SlipManager: React.FC<{
                 };
                 try {
                     await storage.updateSlip(editingSlipId, updateData);
+                    // 連動更新: 同一 slipNumber や groupId を持つ関連伝票(provisional/outbound)にも注文番号等を適用
+                    if (targetSlip?.slipNumber) {
+                        const relatedSlips = slips.filter(sl => sl.id !== editingSlipId && (sl.slipNumber === targetSlip.slipNumber || (targetSlip.groupId && sl.groupId === targetSlip.groupId)));
+                        for (const rel of relatedSlips) {
+                            if (rel.id) {
+                                await storage.updateSlip(rel.id, {
+                                    customerOrderNumber,
+                                    orderingPerson,
+                                    receivingPerson,
+                                    customerName,
+                                    constructionName: siteName
+                                });
+                            }
+                        }
+                    }
                     setEditingSlipId(null);
                     onClearCart();
                     handleTabChange(preEditTab);
@@ -1585,8 +1601,8 @@ export const SlipManager: React.FC<{
             const sTax = Math.round(sNet * 0.1);
             const siteSlipNo = `DET-${targetMonth.replace('-', '')}-${sName.substring(0, 4)}`;
             const siteOrderNums = Array.from(new Set(
-                allSlipsForCustomer
-                    .filter(s => formatSiteName(s.constructionName) === sName && s.customerOrderNumber)
+                slips
+                    .filter(s => s.customerName === cName && formatSiteName(s.constructionName) === sName && s.customerOrderNumber)
                     .map(s => s.customerOrderNumber!)
             )).join(', ');
             const baseMeta: any = { customerName: cName, constructionName: sName, totalAmount: sNet, taxAmount: sTax, grandTotal: sNet + sTax, date: calculatedInvoiceDate, createdAt: Date.now(), isClosed: true, slipNumber: siteSlipNo, customerOrderNumber: siteOrderNums || undefined };
@@ -1611,8 +1627,9 @@ export const SlipManager: React.FC<{
                 const dNet = dItems.reduce((acc, b) => acc + ((b.appliedPrice || 0) * (b.deliveredQuantity || 0)), 0);
                 const dTax = Math.round(dNet * 0.1);
                 
-                // 該当伝票の元の伝票から発注者等の情報を取得 (allSlipsForCustomer 全体から探すことで出庫伝票の注文番号を確実に取得)
-                const originalSlip = allSlipsForCustomer.find(s => s.slipNumber === sourceSlipNo) 
+                // 該当伝票の元の伝票から発注者等の情報を取得 (slips全体から探すことで出庫伝票outboundおよび仮納品書provisionalの注文番号を完全に取得)
+                const originalSlip = slips.find(s => s.slipNumber === sourceSlipNo) 
+                    || allSlipsForCustomer.find(s => s.slipNumber === sourceSlipNo)
                     || validSlips.find(s => s.slipNumber === sourceSlipNo);
                 
                 for (let i = 0; i < dItems.length; i += 16) {
