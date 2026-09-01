@@ -127,6 +127,28 @@ const generateSlipNumber = () => {
 const normalize = (s: string) => s.toLowerCase().trim();
 const formatSiteName = (n?: string) => n?.trim() || '一般・共通';
 
+const extractSiteAndOrderNumber = (constructionName?: string, customerOrderNumber?: string) => {
+    let siteName = constructionName?.trim() || '一般・共通';
+    let orderNo = customerOrderNumber?.trim() || '';
+
+    if (!orderNo && constructionName) {
+        if (constructionName.includes(' : ')) {
+            const parts = constructionName.split(' : ');
+            siteName = parts[0].trim() || siteName;
+            orderNo = parts.slice(1).join(' : ').trim();
+        } else if (constructionName.includes(':')) {
+            const parts = constructionName.split(':');
+            siteName = parts[0].trim() || siteName;
+            orderNo = parts.slice(1).join(':').trim();
+        } else if (constructionName.includes('：')) {
+            const parts = constructionName.split('：');
+            siteName = parts[0].trim() || siteName;
+            orderNo = parts.slice(1).join('：').trim();
+        }
+    }
+    return { siteName, orderNo };
+};
+
 const cleanForFirestore = (obj: any) => {
     const json = JSON.parse(JSON.stringify(obj));
     if (json.id) delete json.id;
@@ -197,6 +219,7 @@ const SlipPage: React.FC<{
     const isWorkSlip = slip.type === 'outbound';
     const isInvoice = slip.type === 'invoice';
     const isDetail = isInvoice || isDelivery;
+    const { siteName: parsedSiteName, orderNo: parsedOrderNo } = extractSiteAndOrderNumber(slip.constructionName, slip.customerOrderNumber);
 
     // 表示している16件分のみの合計金額（縦計算用）
     const pageItems = useMemo(() => slip.items?.slice(0, 16) || [], [slip.items]);
@@ -233,8 +256,8 @@ const SlipPage: React.FC<{
                             <h2 className="text-2xl font-bold border-b-2 border-slate-800 pb-1 inline-block min-w-[300px]">{slip.customerName} 御中</h2>
                             {!isGlobal && (
                                 <div className="flex flex-col gap-2 mt-2">
-                                    <div className="flex items-center gap-2"><span className="bg-slate-800 text-white text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-widest">現場名</span><span className="text-xl font-bold text-slate-700 underline underline-offset-8 decoration-slate-300">{formatSiteName(slip.constructionName)}</span></div>
-                                    {slip.customerOrderNumber && <div className="flex items-center gap-2"><span className="bg-slate-500 text-white text-[9px] px-2 py-0.5 rounded font-bold uppercase tracking-widest">注文番号</span><span className="text-base font-bold text-slate-600">No. {slip.customerOrderNumber}</span></div>}
+                                    <div className="flex items-center gap-2"><span className="bg-slate-800 text-white text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-widest">現場名</span><span className="text-xl font-bold text-slate-700 underline underline-offset-8 decoration-slate-300">{formatSiteName(parsedSiteName)}</span></div>
+                                    {parsedOrderNo && <div className="flex items-center gap-2"><span className="bg-slate-500 text-white text-[9px] px-2 py-0.5 rounded font-bold uppercase tracking-widest">注文番号</span><span className="text-base font-bold text-slate-600">No. {parsedOrderNo}</span></div>}
                                 </div>
                             )}
                         </div>
@@ -423,12 +446,12 @@ const SlipPage: React.FC<{
                 <div className="flex justify-between items-start mb-3">
                     <div className="w-[60%]">
                         <h2 className="text-xl font-bold underline underline-offset-4 mb-3">{slip.customerName} 御中</h2>
-                        <div className="flex items-center gap-2 mb-2"><span className="text-[9px] font-bold border border-slate-400 px-1 rounded bg-slate-50 uppercase">現場</span><span className="font-bold text-base">{formatSiteName(slip.constructionName)}</span></div>
+                        <div className="flex items-center gap-2 mb-2"><span className="text-[9px] font-bold border border-slate-400 px-1 rounded bg-slate-50 uppercase">現場</span><span className="font-bold text-base">{formatSiteName(parsedSiteName)}</span></div>
                         <div className="text-[10px] space-y-1 text-slate-600 font-medium">
                             <p>【配送先】 {DestLabels[slip.deliveryDestination]} / {DeliveryTimeLabels[slip.deliveryTime]}</p>
                             <div className="flex gap-4">
                                 <p>【発注者】 {slip.orderingPerson || '未指定'} 様</p>
-                                {slip.customerOrderNumber && <p>【注文番号】 {slip.customerOrderNumber}</p>}
+                                {parsedOrderNo && <p>【注文番号】 {parsedOrderNo}</p>}
                             </div>
                         </div>
                     </div>
