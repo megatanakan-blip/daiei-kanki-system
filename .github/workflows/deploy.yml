@@ -40,7 +40,10 @@ jobs:
 
       - name: Deploy Firestore Rules to Firebase
         if: ${{ secrets.FIREBASE_TOKEN != '' }}
-        run: npx firebase-tools deploy --only firestore:rules --token "${{ secrets.FIREBASE_TOKEN }}"
+        continue-on-error: true
+        run: npx firebase-tools deploy --only firestore:rules
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
 
       - name: Deploy to gh-pages branch
         uses: JamesIves/github-pages-deploy-action@v4
