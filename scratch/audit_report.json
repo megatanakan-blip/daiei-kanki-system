@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-07-30T08:51:04.177Z",
+  "totalRules": 0,
+  "hasMaterialIdCount": 0,
+  "validMaterialIdCount": 0,
+  "deadMaterialIdCount": 0,
+  "deadRate": "0%",
+  "recoverableByNameCount": 0,
+  "completelyDeadCount": 0,
+  "topAffectedCustomers": []
+}

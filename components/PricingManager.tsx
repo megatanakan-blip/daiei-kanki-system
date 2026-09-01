@@ -100,6 +100,76 @@ export const PricingManager = ({ rules, customers, items, onClose }: PricingMana
         return result;
     }, [referenceRules]);
 
+    const masterItemMap = useMemo(() => new Map(items.map(i => [i.id, i])), [items]);
+    const orphanedRulesCount = useMemo(() => {
+        return rules.filter(r => r.materialId && !masterItemMap.has(r.materialId)).length;
+    }, [rules, masterItemMap]);
+
+    const handleRepairPricingRuleIds = async () => {
+        const orphanedRules = rules.filter(r => r.materialId && !masterItemMap.has(r.materialId));
+
+        if (orphanedRules.length === 0) {
+            return alert("✅ すべての単価ルールの資材IDは正常です（実在しない資材IDは0件です）。");
+        }
+
+        const confirmRun = window.confirm(
+            `🔍 単価ルールの背番号（資材ID）診断結果:\n実在しない資材IDを持つ単価ルールが【 ${orphanedRules.length} 件 】検出されました。\n\n` +
+            `【自動復元・クリーンアップを実行しますか？】\n` +
+            `1. 品名・分類・型式・寸法が一致する実在資材があれば、正しい資材ID（背番号）へ自動更新します。\n` +
+            `2. 一致する資材が見つからない場合は、単価落ちを防ぐため materialId を空にし、名前照合ルールへ安全に変更します。`
+        );
+
+        if (!confirmRun) return;
+
+        setIsSaving(true);
+        let relinkedCount = 0;
+        let clearedCount = 0;
+
+        try {
+            const updatePromises = orphanedRules.map(rule => {
+                const normName = normalizeForSearch(rule.materialName || '');
+                const normCat = normalizeForSearch(rule.category || '');
+                const normModel = normalizeForSearch(rule.model || '');
+                const normDims = normalizeForSearch(rule.dimensions || '');
+
+                const matchedItem = items.find(item => {
+                    return (
+                        normalizeForSearch(item.name) === normName &&
+                        normalizeForSearch(item.category) === normCat &&
+                        normalizeForSearch(item.model || '') === normModel &&
+                        normalizeForSearch(item.dimensions || '') === normDims
+                    );
+                }) || items.find(item => {
+                    return (
+                        normalizeForSearch(item.name) === normName &&
+                        normalizeForSearch(item.category) === normCat &&
+                        normalizeForSearch(item.model || '') === normModel
+                    );
+                });
+
+                if (matchedItem) {
+                    relinkedCount++;
+                    return storage.updatePricingRule(rule.id, { materialId: matchedItem.id });
+                } else {
+                    clearedCount++;
+                    return storage.updatePricingRule(rule.id, { materialId: '' });
+                }
+            });
+
+            await Promise.all(updatePromises);
+            alert(
+                `🎉 背番号照合・修復処理が完了しました！\n\n` +
+                `・実在資材IDへ再紐付け完了: ${relinkedCount} 件\n` +
+                `・名前照合ルールへ安全変更 (IDクリア): ${clearedCount} 件\n` +
+                `・不整合ルール残数: 0 件`
+            );
+        } catch (err: any) {
+            alert(`修復処理中にエラーが発生しました: ${err?.message || '不明なエラー'}`);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
     const handleRegisterCustomer = async () => {
         const name = newCustomerInput.trim();
         if (!name) return;
@@ -284,6 +354,29 @@ export const PricingManager = ({ rules, customers, items, onClose }: PricingMana
                 <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
                     <div className="p-6 border-b flex justify-between items-center"><h2 className="text-xl font-bold flex items-center gap-3"><Users size={24} className="text-blue-600" /> 顧客設定・単価管理</h2><button onClick={onClose}><X size={24} /></button></div>
                     <div className="p-8 bg-slate-50 flex flex-col gap-8 overflow-y-auto">
+                        {/* No.2: 単価ルールの背番号（資材ID）不整合診断・一括自動修復バナー */}
+                        <div className={`p-4 rounded-xl border flex items-center justify-between gap-4 ${orphanedRulesCount > 0 ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-emerald-50 border-emerald-200 text-emerald-900'}`}>
+                            <div className="flex items-center gap-3">
+                                <AlertCircle size={24} className={orphanedRulesCount > 0 ? 'text-amber-600' : 'text-emerald-600'} />
+                                <div>
+                                    <h4 className="font-bold text-sm">
+                                        {orphanedRulesCount > 0 ? `単価ルールの資材ID不整合: ${orphanedRulesCount}件 検出` : '単価ルールの資材ID照合: 正常 (不整合 0件)'}
+                                    </h4>
+                                    <p className="text-xs opacity-80 mt-0.5">
+                                        {orphanedRulesCount > 0
+                                            ? '実在しない資材IDを持つルールを自動検索し、正しい資材へ再紐付け・正常化します。'
+                                            : 'すべての単価ルールが実在する資材ID（背番号）と正しく紐付いています。'}
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={handleRepairPricingRuleIds}
+                                className={`px-4 py-2 rounded-lg text-xs font-bold shrink-0 transition-all shadow-sm ${orphanedRulesCount > 0 ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-emerald-600 hover:bg-emerald-700 text-white'}`}
+                            >
+                                {orphanedRulesCount > 0 ? '一括照合・修復を実行' : '再診断を実行'}
+                            </button>
+                        </div>
+
                         <div className="bg-white p-6 rounded-xl border border-blue-200">
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-2">新しい顧客を登録</label>
                             <div className="flex flex-col gap-2 mb-2">

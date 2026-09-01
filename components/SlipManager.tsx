@@ -5,7 +5,7 @@ import { FEATURE_FLAGS, FEATURE_DISABLED_MESSAGES } from '../config/featureFlags
 import { X, Trash2, Printer, FileText, ShoppingCart, Save, HardHat, Loader2, Edit3, FileOutput, CheckSquare, Square, Search, MapPin, Clock, Users, Info, RotateCcw, AlertTriangle, ArrowRight, Package, Layers, Check, PlusCircle, Calculator, History, Archive, FileStack, ChevronDown, ChevronRight, Building2, Eye, EyeOff, Calendar, User, UserCheck, Camera, Sparkles, Plus, Minus, MessageSquare, Edit2, LayoutGrid, FileSearch, Database, Mail, GripVertical } from 'lucide-react';
 import * as storage from '../services/firebaseService';
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
-import { normalizeForSearch, filterAndSortItems, getAppliedPrice, naturalCompare } from '../services/searchUtils';
+import { normalizeForSearch, filterAndSortItems, getAppliedPrice, naturalCompare, getTodayJSTString, getTodayJSTMonthString } from '../services/searchUtils';
 import { parseReturnMemo } from '../services/geminiService';
 
 import { AppSettings } from '../types';
@@ -249,7 +249,7 @@ const SlipPage: React.FC<{
                                         <span className="font-bold">受注日:</span>
                                         <input 
                                             type="date" 
-                                            value={slip.orderDate || slip.date || new Date().toISOString().split('T')[0]} 
+                                            value={slip.orderDate || slip.date || getTodayJSTString()} 
                                             onChange={(e) => onUpdateSlip?.({ orderDate: e.target.value })}
                                             className="bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-0.5 text-right w-24 print:hidden cursor-pointer hover:bg-slate-100"
                                         />
@@ -259,7 +259,7 @@ const SlipPage: React.FC<{
                                         <span className="font-bold">出庫日:</span>
                                         <input 
                                             type="date" 
-                                            value={slip.date || new Date().toISOString().split('T')[0]} 
+                                            value={slip.date || getTodayJSTString()} 
                                             onChange={(e) => onUpdateSlip?.({ date: e.target.value })}
                                             className="bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-400 rounded p-0.5 text-right w-24 print:hidden cursor-pointer hover:bg-slate-100"
                                         />
@@ -955,8 +955,8 @@ export const SlipManager: React.FC<{
     const [orderingPerson, setOrderingPerson] = useState('');
     const [customerOrderNumber, setCustomerOrderNumber] = useState('');
     const [receivingPerson, setReceivingPerson] = useState('');
-    const [slipDate, setSlipDate] = useState(new Date().toISOString().slice(0, 10));
-    const [orderDate, setOrderDate] = useState(new Date().toISOString().slice(0, 10));
+    const [slipDate, setSlipDate] = useState(getTodayJSTString());
+    const [orderDate, setOrderDate] = useState(getTodayJSTString());
     const [time, setTime] = useState<DeliveryTime>('none');
     const [dest, setDest] = useState<DeliveryDestination>('none');
     const [note, setNote] = useState('');
@@ -967,7 +967,7 @@ export const SlipManager: React.FC<{
     const [showItemSuggestions, setShowItemSuggestions] = useState(false);
     const [isScanning, setIsScanning] = useState(false);
 
-    const [targetMonth, setTargetMonth] = useState<string>(new Date().toISOString().slice(0, 7));
+    const [targetMonth, setTargetMonth] = useState<string>(getTodayJSTMonthString());
     const [historySearchQuery, setHistorySearchQuery] = useState('');
     const [expandedCustomers, setExpandedCustomers] = useState<Set<string>>(new Set<string>());
     const [isAdminUnlocked, setIsAdminUnlocked] = useState(false);
@@ -1486,7 +1486,10 @@ export const SlipManager: React.FC<{
             start = `${py}-${String(pm).padStart(2, '0')}-${String(startDay).padStart(2, '0')}`;
             end = `${y}-${String(m).padStart(2, '0')}-${String(closingDay).padStart(2, '0')}`;
         }
-        const validSlips = allSlipsForCustomer.filter(s => s.date >= start && s.date <= end && (s.type === 'provisional' || s.type === 'return'));
+        const validSlips = allSlipsForCustomer.filter(s => {
+            const inRange = (s.date >= start && s.date <= end) || s.items?.some(i => i.date && i.date >= start && i.date <= end);
+            return inRange && (s.type === 'provisional' || s.type === 'return');
+        });
         if (validSlips.length === 0) return alert("対象期間内に確定済みのデータが存在しません。");
 
         const siteItemsMap = new Map<string, Map<string, SlipItem & { sourceSlipNo?: string }>>();
@@ -1558,7 +1561,12 @@ export const SlipManager: React.FC<{
             const sNet = sItems.reduce((acc, b) => acc + ((b.appliedPrice || 0) * (b.deliveredQuantity || 0)), 0);
             const sTax = Math.round(sNet * 0.1);
             const siteSlipNo = `DET-${targetMonth.replace('-', '')}-${sName.substring(0, 4)}`;
-            const baseMeta: any = { customerName: cName, constructionName: sName, totalAmount: sNet, taxAmount: sTax, grandTotal: sNet + sTax, date: calculatedInvoiceDate, createdAt: Date.now(), isClosed: true, slipNumber: siteSlipNo };
+            const siteOrderNums = Array.from(new Set(
+                validSlips
+                    .filter(s => formatSiteName(s.constructionName) === sName && s.customerOrderNumber)
+                    .map(s => s.customerOrderNumber!)
+            )).join(', ');
+            const baseMeta: any = { customerName: cName, constructionName: sName, totalAmount: sNet, taxAmount: sTax, grandTotal: sNet + sTax, date: calculatedInvoiceDate, createdAt: Date.now(), isClosed: true, slipNumber: siteSlipNo, customerOrderNumber: siteOrderNums || undefined };
             allDocs.push({ ...baseMeta, id: 'site-cover-' + sName, type: 'cover' });
             // 納品明細書 (伝票別分割表示)
             const slipGroups = new Map<string, (SlipItem & { sourceSlipNo?: string })[]>();
@@ -1599,6 +1607,7 @@ export const SlipManager: React.FC<{
                         orderDate: orderDate || originalSlip?.orderDate || '',
                         slipNumber: `DLV-${sourceSlipNo}${i > 0 ? `-${i/16 + 1}` : ''}`,
                         orderingPerson: originalSlip?.orderingPerson,
+                        customerOrderNumber: originalSlip?.customerOrderNumber || baseMeta.customerOrderNumber,
                         receivingPerson: originalSlip?.receivingPerson,
                         issuerPerson: originalSlip?.issuerPerson
                     });
@@ -1732,7 +1741,8 @@ export const SlipManager: React.FC<{
                 end = `${y}-${String(m).padStart(2, '0')}-${String(closingDay).padStart(2, '0')}`;
             }
 
-            if (s.date >= start && s.date <= end) {
+            const isInPeriod = (s.date >= start && s.date <= end) || s.items?.some(i => i.date && i.date >= start && i.date <= end);
+            if (isInPeriod) {
                 if (!map.has(s.customerName)) map.set(s.customerName, new Map());
                 const siteMap = map.get(s.customerName)!;
                 const currentSiteKey = s.constructionName || '一般・共通';
