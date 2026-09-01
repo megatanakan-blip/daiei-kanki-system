@@ -1613,7 +1613,7 @@ export const SlipManager: React.FC<{
                     .map(s => extractSiteAndOrderNumber(s.constructionName, s.customerOrderNumber).orderNo)
             )).join(', ');
 
-            const baseMeta: any = { customerName: cName, constructionName: sName, totalAmount: sNet, taxAmount: sTax, grandTotal: sNet + sTax, date: calculatedInvoiceDate, createdAt: Date.now(), isClosed: true, slipNumber: siteSlipNo, customerOrderNumber: siteOrderNums || undefined };
+            const baseMeta: any = { customerName: cName, constructionName: sName, totalAmount: sNet, taxAmount: sTax, grandTotal: sNet + sTax, date: calculatedInvoiceDate, createdAt: Date.now(), isClosed: true, slipNumber: siteSlipNo };
             allDocs.push({ ...baseMeta, id: 'site-cover-' + sName, type: 'cover' });
             // 納品明細書 (伝票別分割表示)
             const slipGroups = new Map<string, (SlipItem & { sourceSlipNo?: string })[]>();
@@ -1639,11 +1639,11 @@ export const SlipManager: React.FC<{
                 const originalSlip = slips.find(s => s.slipNumber === sourceSlipNo && ((s.customerOrderNumber && s.customerOrderNumber.trim() !== '') || extractSiteAndOrderNumber(s.constructionName).orderNo !== ''))
                     || slips.find(s => s.slipNumber === sourceSlipNo)
                     || allSlipsForCustomer.find(s => s.slipNumber === sourceSlipNo)
-                    || validSlips.find(s => s.slipNumber === sourceSlipNo)
-                    || slips.find(s => (s.customerName === cName || normalize(s.customerName) === normalize(cName)) && extractSiteAndOrderNumber(s.constructionName).siteName === targetBaseSiteName && (s.customerOrderNumber || extractSiteAndOrderNumber(s.constructionName).orderNo));
+                    || validSlips.find(s => s.slipNumber === sourceSlipNo);
 
                 const extOrder = extractSiteAndOrderNumber(originalSlip?.constructionName, originalSlip?.customerOrderNumber).orderNo;
-                const finalCustomerOrderNo = extOrder || originalSlip?.customerOrderNumber || siteOrderNums || undefined;
+                // 納品書のみに個別の注文番号を適用（表紙や請求書には表示しない）
+                const deliveryOrderNo = extOrder || originalSlip?.customerOrderNumber || undefined;
 
                 for (let i = 0; i < dItems.length; i += 16) {
                     const chunk = dItems.slice(i, i + 16);
@@ -1661,7 +1661,7 @@ export const SlipManager: React.FC<{
                         orderDate: orderDate || originalSlip?.orderDate || '',
                         slipNumber: `DLV-${sourceSlipNo}${i > 0 ? `-${i/16 + 1}` : ''}`,
                         orderingPerson: originalSlip?.orderingPerson,
-                        customerOrderNumber: finalCustomerOrderNo,
+                        customerOrderNumber: deliveryOrderNo,
                         receivingPerson: originalSlip?.receivingPerson,
                         issuerPerson: originalSlip?.issuerPerson
                     });
