@@ -1585,7 +1585,7 @@ export const SlipManager: React.FC<{
             const sTax = Math.round(sNet * 0.1);
             const siteSlipNo = `DET-${targetMonth.replace('-', '')}-${sName.substring(0, 4)}`;
             const siteOrderNums = Array.from(new Set(
-                validSlips
+                allSlipsForCustomer
                     .filter(s => formatSiteName(s.constructionName) === sName && s.customerOrderNumber)
                     .map(s => s.customerOrderNumber!)
             )).join(', ');
@@ -1611,8 +1611,9 @@ export const SlipManager: React.FC<{
                 const dNet = dItems.reduce((acc, b) => acc + ((b.appliedPrice || 0) * (b.deliveredQuantity || 0)), 0);
                 const dTax = Math.round(dNet * 0.1);
                 
-                // 該当伝票の元の伝票から発注者等の情報を取得
-                const originalSlip = validSlips.find(s => s.slipNumber === sourceSlipNo && formatSiteName(s.constructionName) === sName);
+                // 該当伝票の元の伝票から発注者等の情報を取得 (allSlipsForCustomer 全体から探すことで出庫伝票の注文番号を確実に取得)
+                const originalSlip = allSlipsForCustomer.find(s => s.slipNumber === sourceSlipNo) 
+                    || validSlips.find(s => s.slipNumber === sourceSlipNo);
                 
                 for (let i = 0; i < dItems.length; i += 16) {
                     const chunk = dItems.slice(i, i + 16);
