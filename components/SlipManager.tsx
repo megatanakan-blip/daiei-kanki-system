@@ -1600,11 +1600,19 @@ export const SlipManager: React.FC<{
             const sNet = sItems.reduce((acc, b) => acc + ((b.appliedPrice || 0) * (b.deliveredQuantity || 0)), 0);
             const sTax = Math.round(sNet * 0.1);
             const siteSlipNo = `DET-${targetMonth.replace('-', '')}-${sName.substring(0, 4)}`;
+            
+            const targetBaseSiteName = extractSiteAndOrderNumber(sName).siteName;
             const siteOrderNums = Array.from(new Set(
                 slips
-                    .filter(s => s.customerName === cName && formatSiteName(s.constructionName) === sName && s.customerOrderNumber)
-                    .map(s => s.customerOrderNumber!)
+                    .filter(s => {
+                        const sameCustomer = s.customerName === cName || normalize(s.customerName) === normalize(cName);
+                        const sameSite = extractSiteAndOrderNumber(s.constructionName).siteName === targetBaseSiteName;
+                        const ext = extractSiteAndOrderNumber(s.constructionName, s.customerOrderNumber);
+                        return sameCustomer && sameSite && ext.orderNo !== '';
+                    })
+                    .map(s => extractSiteAndOrderNumber(s.constructionName, s.customerOrderNumber).orderNo)
             )).join(', ');
+
             const baseMeta: any = { customerName: cName, constructionName: sName, totalAmount: sNet, taxAmount: sTax, grandTotal: sNet + sTax, date: calculatedInvoiceDate, createdAt: Date.now(), isClosed: true, slipNumber: siteSlipNo, customerOrderNumber: siteOrderNums || undefined };
             allDocs.push({ ...baseMeta, id: 'site-cover-' + sName, type: 'cover' });
             // 納品明細書 (伝票別分割表示)
@@ -1627,11 +1635,16 @@ export const SlipManager: React.FC<{
                 const dNet = dItems.reduce((acc, b) => acc + ((b.appliedPrice || 0) * (b.deliveredQuantity || 0)), 0);
                 const dTax = Math.round(dNet * 0.1);
                 
-                // 該当伝票の元の伝票から発注者等の情報を取得 (slips全体から探すことで出庫伝票outboundおよび仮納品書provisionalの注文番号を完全に取得)
-                const originalSlip = slips.find(s => s.slipNumber === sourceSlipNo) 
+                // 元伝票の決定: 同一 slipNumber の中で注文番号(customerOrderNumber)が存在する伝票を最優先で検索
+                const originalSlip = slips.find(s => s.slipNumber === sourceSlipNo && ((s.customerOrderNumber && s.customerOrderNumber.trim() !== '') || extractSiteAndOrderNumber(s.constructionName).orderNo !== ''))
+                    || slips.find(s => s.slipNumber === sourceSlipNo)
                     || allSlipsForCustomer.find(s => s.slipNumber === sourceSlipNo)
-                    || validSlips.find(s => s.slipNumber === sourceSlipNo);
-                
+                    || validSlips.find(s => s.slipNumber === sourceSlipNo)
+                    || slips.find(s => (s.customerName === cName || normalize(s.customerName) === normalize(cName)) && extractSiteAndOrderNumber(s.constructionName).siteName === targetBaseSiteName && (s.customerOrderNumber || extractSiteAndOrderNumber(s.constructionName).orderNo));
+
+                const extOrder = extractSiteAndOrderNumber(originalSlip?.constructionName, originalSlip?.customerOrderNumber).orderNo;
+                const finalCustomerOrderNo = extOrder || originalSlip?.customerOrderNumber || siteOrderNums || undefined;
+
                 for (let i = 0; i < dItems.length; i += 16) {
                     const chunk = dItems.slice(i, i + 16);
                     const chunkNet = chunk.reduce((acc, b) => acc + ((b.appliedPrice || 0) * (b.deliveredQuantity || 0)), 0);
@@ -1648,7 +1661,7 @@ export const SlipManager: React.FC<{
                         orderDate: orderDate || originalSlip?.orderDate || '',
                         slipNumber: `DLV-${sourceSlipNo}${i > 0 ? `-${i/16 + 1}` : ''}`,
                         orderingPerson: originalSlip?.orderingPerson,
-                        customerOrderNumber: originalSlip?.customerOrderNumber || baseMeta.customerOrderNumber,
+                        customerOrderNumber: finalCustomerOrderNo,
                         receivingPerson: originalSlip?.receivingPerson,
                         issuerPerson: originalSlip?.issuerPerson
                     });
