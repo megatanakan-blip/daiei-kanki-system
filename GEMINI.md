@@ -182,6 +182,7 @@ VALUES (datetime('now','+9 hours'), 'gemini', 'やった事', '進捗', 'つま�
 - 日付は日本時間で入れてください（`datetime('now','+9 hours')`）。
 - `by_who` は `gemini` と書いてください（誰が書いたか分かるようにするためです）。
 - **問題点一覧を書き換えないでください**（盤面は読み取り専用です）。状態の更新は記録側への書き足しで伝わります。
+- **デプロイ・Gitプッシュ先**: 必ず **`megatanakan`** アカウント（`https://github.com/megatanakan-blip/daiei-kanki-system.git`）のみへプッシュ・デプロイを行ってください。他のアカウントやテスト環境へプッシュ・デプロイしてはいけません。
 
 ---
 
