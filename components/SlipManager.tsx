@@ -2375,12 +2375,12 @@ export const SlipManager: React.FC<{
                     ) : (
                         <div className="space-y-4 animate-fade-in">
                             {(activeTab === 'pending' ? pendingOutbounds : reslips).map(s => (
-                                <div key={s.id} className={`bg-white p-4 md:p-6 rounded-[2rem] border flex flex-col md:flex-row justify-between items-start md:items-center shadow-sm hover:shadow-xl transition-all border-l-8 ${activeTab === 'reslip' ? 'border-l-orange-500' : 'border-l-blue-600'} gap-4`}>
+                                <div key={s.id} className={`bg-white p-4 md:p-6 rounded-[2rem] border flex flex-col md:flex-row justify-between items-start md:items-center shadow-sm hover:shadow-xl transition-all border-l-8 ${(activeTab === 'reslip' || s.isFromReslip) ? 'border-l-orange-500' : 'border-l-blue-600'} gap-4`}>
                                     <div className="flex items-center gap-4 w-full md:w-auto overflow-hidden">
                                         <div className="relative shrink-0">
-                                            <div className={`w-12 h-12 md:w-16 md:h-16 ${activeTab === 'reslip' ? 'bg-orange-50 text-orange-600' : 'bg-blue-50 text-blue-600'} rounded-[1.5rem] flex items-center justify-center shadow-inner`}><FileText size={24} className="md:w-8 md:h-8" /></div>
+                                            <div className={`w-12 h-12 md:w-16 md:h-16 ${activeTab === 'reslip' ? 'bg-orange-50 text-orange-600' : (s.isFromReslip ? 'bg-orange-50 text-orange-600' : 'bg-blue-50 text-blue-600')} rounded-[1.5rem] flex items-center justify-center shadow-inner`}><FileText size={24} className="md:w-8 md:h-8" /></div>
                                             {(activeTab === 'reslip' || s.isFromReslip) && (
-                                                <div className="absolute -top-1.5 -right-1.5 w-6 h-6 md:w-7 md:h-7 bg-orange-500 text-white rounded-full flex items-center justify-center shadow-md border-2 border-white" title="欠品再伝票">
+                                                <div className="absolute -top-1.5 -right-1.5 w-6 h-6 md:w-7 md:h-7 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-full flex items-center justify-center shadow-md border-2 border-white" title="欠品再作成伝票">
                                                     <span className="text-[9px] md:text-[10px] font-black leading-none">再</span>
                                                 </div>
                                             )}
@@ -2389,15 +2389,29 @@ export const SlipManager: React.FC<{
                                             <div className="font-black text-base md:text-lg text-slate-900 leading-tight whitespace-nowrap overflow-hidden text-ellipsis flex items-center gap-2">
                                                 {s.customerName} <span className="text-xs text-slate-400 font-bold tracking-tight inline-block">({formatSiteName(s.constructionName)})</span>
                                                 {activeTab === 'reslip' && <span className="bg-orange-100 text-orange-700 text-[9px] px-2 py-0.5 rounded-full font-black border border-orange-200">欠品・未納</span>}
-                                                {(activeTab === 'pending' && s.isFromReslip) && <span className="bg-orange-100 text-orange-700 text-[9px] px-2 py-0.5 rounded-full font-black border border-orange-200">再作成伝票</span>}
+                                                {(activeTab === 'pending' && s.isFromReslip) && (
+                                                    <span className="bg-gradient-to-r from-orange-500 to-amber-500 text-white text-[10px] px-2.5 py-0.5 rounded-full font-black shadow-md flex items-center gap-1 animate-pulse">
+                                                        <RotateCcw size={10} className="stroke-[3]" /> 再作成伝票 (元欠品分)
+                                                    </span>
+                                                )}
                                                 {s.source === 'link' && <span className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-[9px] px-2 py-0.5 rounded-full font-black animate-pulse shadow-sm">LINK注文</span>}
                                             </div>
-                                            {s.items?.[0] && (
-                                                <div className="flex items-center gap-1.5 mt-1.5">
-                                                    <div className="px-2 py-0.5 bg-blue-50 text-[10px] font-black text-blue-700 rounded-lg border border-blue-100 flex items-center gap-1.5 shadow-sm">
-                                                        <Package size={12} className="text-blue-400" />
-                                                        {s.items[0].name} {s.items.length > 1 ? ` 外 ${s.items.length - 1}点` : ''}
-                                                    </div>
+                                            {s.items && s.items.length > 0 && (
+                                                <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                                                    {activeTab === 'reslip' ? (
+                                                        s.items.map((item, idx) => (
+                                                            <span key={idx} className="px-2.5 py-1 bg-orange-50 text-[10px] font-black text-orange-800 rounded-lg border border-orange-200/80 flex items-center gap-1 shadow-sm">
+                                                                <Package size={12} className="text-orange-500 shrink-0" />
+                                                                <span>{item.name} {item.model ? `(${item.model})` : ''}</span>
+                                                                <span className="bg-orange-200/60 px-1.5 py-0.5 rounded text-[9px] font-bold ml-0.5">✕{item.quantity}</span>
+                                                            </span>
+                                                        ))
+                                                    ) : (
+                                                        <div className="px-2 py-0.5 bg-blue-50 text-[10px] font-black text-blue-700 rounded-lg border border-blue-100 flex items-center gap-1.5 shadow-sm">
+                                                            <Package size={12} className="text-blue-400" />
+                                                            {s.items[0].name} {s.items.length > 1 ? ` 外 ${s.items.length - 1}点` : ''}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             )}
                                             <div className="text-[10px] text-slate-400 font-mono mt-1 font-bold uppercase tracking-widest flex items-center gap-2">
@@ -2409,7 +2423,7 @@ export const SlipManager: React.FC<{
                                             </div>
                                         </div>
                                     </div>
-                                    <div className="flex gap-2 w-full md:w-auto">
+                                    <div className="flex gap-2 w-full md:w-auto shrink-0">
                                         {activeTab === 'pending' ? (
                                             <>
                                                 <button onClick={() => { setConfirmingOutbound(s); setActualQuantities(s.items.reduce((a, v, idx) => ({ ...a, [`${v.id}-${idx}`]: v.quantity }), {} as Record<string, number>)); }} className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-700 text-white px-4 md:px-8 py-3 rounded-2xl text-[10px] md:text-[11px] font-black shadow-xl shadow-blue-100 active:scale-95 transition-all uppercase tracking-widest whitespace-nowrap">
@@ -2423,9 +2437,25 @@ export const SlipManager: React.FC<{
                                                 </button>
                                             </>
                                         ) : (
-                                            <button onClick={() => handleRestoreReslip(s)} className="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-700 text-white px-4 md:px-8 py-3 rounded-2xl text-[10px] md:text-[11px] font-black shadow-xl shadow-emerald-100 active:scale-95 transition-all uppercase tracking-widest whitespace-nowrap">
-                                                <span className="md:hidden">再作成</span><span className="hidden md:inline">欠品分を再作成</span>
-                                            </button>
+                                            <div className="flex gap-2 flex-1 md:flex-none">
+                                                <button 
+                                                    onClick={() => { setPrintingSlips(splitSlipIntoPages(s)); }} 
+                                                    className="flex-1 md:flex-none bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 px-4 md:px-5 py-3 rounded-2xl text-[10px] md:text-[11px] font-black transition-all flex items-center justify-center gap-1.5 active:scale-95 shadow-sm whitespace-nowrap"
+                                                    title="欠品伝票の中身を印刷プレビューで確認"
+                                                >
+                                                    <Eye size={16} className="text-slate-600" />
+                                                    <span className="md:hidden">プレビュー</span>
+                                                    <span className="hidden md:inline">プレビュー確認</span>
+                                                </button>
+                                                <button 
+                                                    onClick={() => handleRestoreReslip(s)} 
+                                                    className="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-700 text-white px-4 md:px-8 py-3 rounded-2xl text-[10px] md:text-[11px] font-black shadow-xl shadow-emerald-100 active:scale-95 transition-all uppercase tracking-widest whitespace-nowrap flex items-center justify-center gap-2"
+                                                >
+                                                    <RotateCcw size={16} />
+                                                    <span className="md:hidden">再作成</span>
+                                                    <span className="hidden md:inline">欠品分を再作成</span>
+                                                </button>
+                                            </div>
                                         )}
                                         <button
                                             disabled
