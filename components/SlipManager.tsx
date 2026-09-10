@@ -1450,8 +1450,9 @@ export const SlipManager: React.FC<{
             if (confirmingOutbound.id) await storage.updateSlip(confirmingOutbound.id, { isClosed: true, isHandled: true });
 
             if (missingItems.length > 0) {
-                const rs: Omit<Slip, 'id'> = {
+                const rs: Slip = {
                     ...cleanForFirestore(confirmingOutbound),
+                    id: generateId(),
                     type: 'reslip',
                     items: missingItems,
                     totalAmount: 0,
@@ -1463,11 +1464,20 @@ export const SlipManager: React.FC<{
                     isClosed: false
                 };
                 await storage.addSlip(cleanForFirestore(rs));
+
+                setConfirmingOutbound(null);
+                setIssuerName('');
+                handleTabChange('reslip');
+                setPrintingSlips([
+                    ...splitSlipIntoPages({ ...provSlip, id: generateId() } as Slip),
+                    ...splitSlipIntoPages(rs)
+                ]);
+            } else {
+                setConfirmingOutbound(null);
+                setIssuerName('');
+                handleTabChange('pending');
+                setPrintingSlips(splitSlipIntoPages({ ...provSlip, id: generateId() } as Slip));
             }
-            setConfirmingOutbound(null);
-            setIssuerName('');
-            handleTabChange(missingItems.length > 0 ? 'reslip' : 'pending');
-            setPrintingSlips(splitSlipIntoPages({ ...provSlip, id: generateId() } as Slip));
         } finally { setIsSaving(false); }
     };
 
